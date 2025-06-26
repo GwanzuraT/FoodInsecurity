@@ -1,0 +1,503 @@
+---
+title: "Modellers and Story Tellers: Group 2 project"
+author: "Tendai Gwanzura"
+format: html
+editor: visual
+date: "6/25/2025"
+---
+
+## Hollywood coalition data cleaning and analysis.
+
+
+This file contains the data cleaning and data analysis for Hollywood Food Coalition an organization aimimg to reduce food insecurity in Los Angeles.
+
+.
+
+## Install and load libaries
+
+install.packages("readxl")
+install.packages("openxlsx")
+install.packages("dplyr")
+install.packages("ggplot2")
+install.packages("janitor")
+install.packages("tidyr") 
+install.packages("stringr")  
+install.packages("tidytext")
+install.packages("topicmodels")
+install.packages("wordcloud")
+install.packages("RColorBrewer")
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+
+
+# Load libraries
+library(readxl)
+library(openxlsx)
+library(dplyr)
+library(ggplot2)
+library(janitor)
+library(tidyr) 
+library(stringr)
+```
+
+# Load and Prepare the Data
+
+Use read_excel to load data, after removing encryption in excel and rename new file to HFC_2025. 
+For password openxlsx does not work despite having the password option.
+
+```{r}
+#| echo: true
+HFC_2025 <- read_excel("HFC _2025.xlsx")
+View(HFC_2025)
+
+names(HFC_2025)
+```
+
+
+```{r}
+#| echo: true
+# Total unique individuals served weekly
+summary(HFC_2025$'Unique individuals served weekly')
+
+# Total individuals served monthly
+summary(HFC_2025$'Unique individuals served monthly')
+
+```
+
+
+The variable names contain spaces hence will need to be cleaned using the janitor package creating a new data set HFC_2025_clean.
+
+```{r clean_variables}
+
+HFC_2025_clean <- clean_names(HFC_2025)
+
+# View column names to check
+names(HFC_2025_clean)
+
+
+
+```
+
+We can see a summary of the individuals served weekly and monthly.  
+
+```{r service_volume}
+#| echo: true
+
+summary(HFC_2025_clean$unique_individuals_served_weekly)
+summary(HFC_2025_clean$total_served_weekly)
+summary(HFC_2025_clean$unique_individuals_served_monthly)
+summary(HFC_2025_clean$total_served_monthly)
+```
+
+# Age and gender distribution across all organizations
+
+```{r age_summary}
+
+age_distribution <- HFC_2025_clean %>%
+  summarise(
+    under_18 = mean(as.numeric(under_18_population_percentage), na.rm = TRUE),
+    age_18_25 = mean(as.numeric(x18_25_population_percentage), na.rm = TRUE),
+    age_26_40 = mean(as.numeric(x26_40_population_percentage), na.rm = TRUE),
+    age_41_65 = mean(as.numeric(x41_65_population_percentage), na.rm = TRUE),
+    age_65_plus = mean(as.numeric(x65_population_percentage), na.rm = TRUE)
+  )
+age_distribution
+
+
+# Reshape tibble to long format
+age_long <- age_distribution %>%
+  pivot_longer(cols = everything(),
+               names_to = "age_group",
+               values_to = "proportion")
+
+ggplot(age_long, aes(x = "", y = proportion, fill = age_group)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y") +
+  labs(title = "Proportion of Individuals Served by Age Group") +
+  scale_fill_brewer(palette = "Set3") +
+  theme_void()
+```
+On average, 6.1% of individuals served across all organizations are under 18. Around 17.2% of individuals are young adults (18–25). About 32.5% are adults aged 26–40. About 32.5% are middle-aged to older adults (41–65). Around 12.6% are seniors, aged 65 and above.
+
+```{r gender_summary}
+
+# Gender distribution
+gender_distribution <- HFC_2025_clean %>%
+  summarise(
+    male = mean(as.numeric(male_gender_make_up), na.rm = TRUE),
+    female = mean(as.numeric(female_gender_make_up), na.rm = TRUE),
+    non_binary = mean(as.numeric(non_binary_gender_make_up), na.rm = TRUE),
+    transgender = mean(as.numeric(transgender_gender_make_up), na.rm = TRUE)
+  )
+gender_distribution
+```
+
+About 54.3% of the individuals served are male.About 41.5% are female.About 2.2% are non-binary.	About 5.6% identify as transgender (can overlap with other categories depending on how the data was reported). The following plot shows gender distribution across all partners.
+
+```{r gender_plot}
+#| echo: true
+# Using results from above to plot the gender 
+gender_data <- data.frame(
+  Gender = c("Male", "Female", "Non-binary", "Transgender"),
+  Proportion = c(0.5432432, 0.4145946, 0.022, 0.05645161)
+)
+
+ggplot(gender_data, aes(x = Gender, y = Proportion, fill = Gender)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(title = "Gender Distribution of Individuals Served",
+       y = "Proportion",
+       x = "") +
+  theme_minimal()
+```
+
+The following shows the distribution of the different populations in the dataset.
+
+```{r population_dynamics}
+#| echo: true
+pop_focus <- HFC_2025_clean %>%
+  summarise(
+    unhoused = mean(as.numeric(unhoused), na.rm = TRUE),
+    lgbtq = mean(as.numeric(lbgtq), na.rm = TRUE),
+    veterans = mean(as.numeric(veterans_served), na.rm = TRUE),
+    previously_incarcerated = mean(as.numeric(previously_incarcerated), na.rm = TRUE)
+  )
+pop_focus
+
+pop_data <- data.frame(
+  Group = c("Unhoused", "LGBTQ+", "Veterans", "Previously Incarcerated"),
+  Percentage = c(
+    pop_focus$unhoused,
+    pop_focus$lgbtq,
+    pop_focus$veterans,
+    pop_focus$previously_incarcerated
+  )
+)
+
+ggplot(pop_data, aes(x = Group, y = Percentage)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(
+    title = "Average % of Vulnerable Populations Served",
+    y = "Average Percentage", x = ""
+  ) +
+  theme_minimal()
+
+
+```
+
+
+# Cleaning and plottin race
+
+Race contains mixed data that is string and numeric we might need to separate it using the following code.
+
+```{r cleaning_formatting_race}
+
+
+# View unique entries to understand formatting
+unique(HFC_2025_clean$racial_makeup_of_population_served)
+
+
+# Extract percent-race pairs from raw race string
+race_cleaned <- HFC_2025_clean %>%
+  select(org_id, organization_type, racial_makeup_of_population_served) %>%
+  filter(!is.na(racial_makeup_of_population_served)) %>%
+  mutate(race_raw = tolower(racial_makeup_of_population_served)) %>%
+  mutate(race_raw = str_replace_all(race_raw, "hispanic|latino|latino70%", "latinx"),
+         race_raw = str_replace_all(race_raw, "balck", "black"),
+         race_raw = str_replace_all(race_raw, "brown", "latinx"),
+         race_raw = str_replace_all(race_raw, "armenian|arab|armenianrussian|filipino|korean|colombian|salvadorian|venezulian", "other"),
+         race_raw = str_replace_all(race_raw, "multi|bipoc|no one race.*|diaspora", "other"))
+
+# Use regex to extract all value-group pairs
+race_long <- race_cleaned %>%
+  mutate(extracted = str_extract_all(race_raw, "(\\d+\\.?\\d*)\\s*%\\s*\\s*(\\w+)")) %>%
+  unnest(extracted) %>%
+  mutate(
+    value = as.numeric(str_extract(extracted, "\\d+\\.?\\d*")) / 100,
+    group = str_extract(extracted, "(?<=%)\\s*\\w+") %>% str_trim()
+  ) %>%
+  filter(!is.na(group), !is.na(value))
+
+
+
+```
+
+Important to note not all organizations include the percent of racial makeup they just list the races. The following plot assesses data which contains % makeup of the 38 out of the total 42 organizations without missing data.
+Filipino, Russian, Armenian and other country specific were set to other for now hence the large percent of other.
+```{r plot_race}
+#| echo: true
+race_summary <- race_long %>%
+  group_by(group) %>%
+  summarise(mean_pct = mean(value, na.rm = TRUE))
+
+ggplot(race_summary, aes(x = reorder(group, -mean_pct), y = mean_pct, fill = group)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(title = "Average Racial Composition Across All Organizations",
+       y = "Mean % Served", x = "Race") +
+  theme_minimal()
+
+```
+```{r race_plot_each_org}
+ggplot(race_long, aes(x = org_id, y = group, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(labels = scales::percent_format()) +
+  labs(title = "Racial Composition per Organization",
+       x = "Organization", y = "Race Group", fill = "% Served") +
+  theme_minimal()
+```
+
+This visualization highlights how racial representation varies by organization. While Latinx and Black communities are consistently represented, some organizations show a near-exclusive service to one group. This racial composition is important for understanding equity in food access and can inform tailored programming and outreach. Notably, Asian and 'Other' populations appear less frequently, which could suggest either demographic realities or potential service gaps. Also not all organizations iclude percent of people affected.
+
+# Plotting the reach and scale
+
+```{r reach_and_scale}
+
+HFC_2025_clean %>% 
+  select(unique_individuals_served_weekly, total_served_weekly, 
+         unique_individuals_served_monthly, total_served_monthly) %>%
+  summary()
+
+# Plot total served weekly
+HFC_2025_clean %>%
+  ggplot(aes(x = total_served_weekly)) +
+  geom_histogram(bins = 20, fill = "steelblue") +
+  labs(title = "Distribution of Total Weekly Individuals Served",
+       x = "Total Served Weekly", y = "Number of Organizations")
+```
+
+
+# Qualitative Impact
+
+Utilising word cloud to view impact.The default stopwords("en") removes general English filler words (like "the", "is", "it"). But our text still contains domain-irrelevant or generic words like:
+guys, week, kids, know, one, used, get, great, makes, just, able, come, etc.
+
+```{r install_wordcloud, include=FALSE}
+
+library(wordcloud)
+library(RColorBrewer)
+```
+
+
+```{r story_wordcloud}
+
+library(tm)
+library(wordcloud)
+library(RColorBrewer)
+
+# Combine the three story columns into one text blob
+stories <- paste(HFC_2025_clean$impact_story_1,
+                 HFC_2025_clean$impact_story_2,
+                 HFC_2025_clean$impact_story_3,
+                 sep = " ")
+
+# Create a corpus
+corpus <- Corpus(VectorSource(stories))
+
+# Clean the text
+corpus <- tm_map(corpus, content_transformer(tolower))
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, removeNumbers)
+
+# Add custom stop words
+custom_stopwords <- c(stopwords("en"),
+                      "week", "kids", "get", "guys", "used", "arnold", "one", 
+                      "makes", "great", "know", "just", "will", "today", 
+                      "around", "every", "come", "able", "feel", "good", 
+                      "meal", "meals", "used", "try", "used", "used")
+
+corpus <- tm_map(corpus, removeWords, custom_stopwords)
+
+# Create term-document matrix
+tdm <- TermDocumentMatrix(corpus)
+m <- as.matrix(tdm)
+
+# Frequency table
+word_freq <- sort(rowSums(m), decreasing = TRUE)
+df_words <- data.frame(word = names(word_freq), freq = word_freq)
+
+# Word cloud
+wordcloud(words = df_words$word,
+          freq = df_words$freq,
+          min.freq = 2,
+          max.words = 100,
+          random.order = FALSE,
+          colors = brewer.pal(8, "Dark2"))
+
+```
+The most frequent words include:
+
+“food”, “people”, “give”, “quality”, “produce”, “relief”, “nutritious”, “kitchen”, “residents”, “parents”, “love”
+
+The word ‘food’ dominates the stories — underscoring its centrality to service impact.
+
+‘Relief’, ‘quality’, and ‘produce’ point to the value and trust recipients associate with the program.
+
+References to ‘residents’, ‘parents’, and ‘love’ highlight emotional and familial dimensions of food insecurity.
+
+# We can go further and create themes based on the words.
+
+For this I chose nutrition, community, empowerment, distribution, emotion.
+
+```{r creating_themes_for word}
+
+# Combine all 3 story columns into one text column
+HFC_2025_clean <- HFC_2025_clean %>%
+  mutate(
+    all_stories = paste(impact_story_1, impact_story_2, impact_story_3, sep = " ")
+  ) %>%
+  mutate(all_stories = str_to_lower(all_stories))
+
+```
+
+```{r creating_themes}
+themes <- list(
+  nutrition = c("food", "produce", "nutritious", "meal", "soup", "bread", "kitchen", "pasta", "chickens"),
+  community = c("people", "residents", "parents", "love", "relationship", "couple", "kids"),
+  empowerment = c("relief", "quality", "help", "support", "serve", "able", "can", "appreciate", "bring"),
+  distribution = c("kitchen", "week", "today", "pick", "share", "used", "used much"),
+  emotion = c("feel", "great", "thank", "love", "appreciate", "connection")
+)
+
+# Create a function to detect themes based on keywords
+detect_theme <- function(text, keywords) {
+  any(str_detect(text, paste(keywords, collapse = "|")))
+}
+
+# Apply theme detection to each story
+theme_tags <- HFC_2025_clean %>%
+  rowwise() %>%
+  mutate(
+    nutrition = detect_theme(all_stories, themes$nutrition),
+    community = detect_theme(all_stories, themes$community),
+    empowerment = detect_theme(all_stories, themes$empowerment),
+    distribution = detect_theme(all_stories, themes$distribution),
+    emotion = detect_theme(all_stories, themes$emotion)
+  ) %>%
+  ungroup()
+
+```
+
+```{r}
+#| echo: true
+theme_summary <- theme_tags %>%
+  select(nutrition, community, empowerment, distribution, emotion) %>%
+  summarise(across(everything(), ~sum(.)))
+
+theme_summary_long <- pivot_longer(theme_summary, everything(), names_to = "theme", values_to = "count")
+
+ggplot(theme_summary_long, aes(x = reorder(theme, -count), y = count, fill = theme)) +
+  geom_col() +
+  labs(title = "Number of Stories Matching Each Impact Theme",
+       x = "Theme", y = "Count of Organizations") +
+  theme_minimal()
+
+```
+
+Note we can go further and do topic modelling but will leave it at themes for now.
+
+# Organization value and resilience
+
+```{r volunteer_orgs}
+#| echo: true
+
+HFC_2025_clean %>% 
+  count(volunteer_run_organization) %>%
+  ggplot(aes(x = volunteer_run_organization, y = n, fill = volunteer_run_organization)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Volunteer-Run vs Non-Volunteer Organizations",
+       x = "Volunteer Run", y = "Count") +
+  theme_minimal()
+```
+Nearly half of the organizations that HoFoCo works with with are volunteer-run, highlighting a strong reliance on community-driven labor. However, a slightly greater number operate with non-volunteer staffing structures. This suggests a mix of grassroots and institutional capacity within the partner network. The presence of missing values also points to potential opportunities to improve data collection clarity or completeness.”
+
+
+## Text exploration 
+
+# Importance of HoFoCo
+
+```{r hypothetical_needs}
+
+HFC_2025_clean %>%
+  count(`hypothetical_food_response_without_hofoco`) %>%
+  ggplot(aes(x = reorder(`hypothetical_food_response_without_hofoco`, -n), y = n)) +
+  geom_bar(stat = "identity", fill = "tomato") +
+  coord_flip() +
+  labs(title = "If HoFoCo Didn't Deliver...",
+       x = "Reported Impact", y = "Number of Partners") +
+  theme_minimal()
+```
+
+```{r}
+
+library(tidytext)
+library(topicmodels)
+library(reshape2)
+
+# Tokenize into document-term matrix
+df <- HFC_2025_clean %>%
+  select(org_id, hypothetical_food_response_without_hofoco) %>%
+  unnest_tokens(word, hypothetical_food_response_without_hofoco) %>%
+  anti_join(stop_words) %>%
+  count(org_id, word) %>%
+  cast_dtm(org_id, word, n)
+
+# LDA: Extract 3 topics
+lda_model <- LDA(df, k = 3, control = list(seed = 1234))
+topics <- tidy(lda_model, matrix = "beta")
+
+# Show top 10 terms per topic
+library(dplyr)
+topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+```
+
+Top 10 keywords: food, budget, purchase, increase, consistency, serve, quality, farmers based on probability values. Now to view all 97 in topics.
+```{r}
+#| echo: true
+
+top_terms <- topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+ggplot(top_terms, aes(x = reorder_within(term, beta, topic), y = beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free_y") +
+  coord_flip() +
+  scale_x_reordered() +
+  labs(title = "Top Terms per LDA Topic",
+       x = "Term", y = "Beta (Importance in Topic)")
+
+```
+Using Latent Dirichlet Allocation (LDA), we identified 3 major thematic clusters from open-text responses in the "hypothetical_food_response_without_hofoco" question:
+
+Topic 1: Food Budgeting and Procurement
+Top terms: food, budget, purchase, consistency, increase, serve, resources, raise, distribute, continue
+This topic centers around how organizations plan for and manage food procurement, budgeting constraints, and ensuring consistent distribution.
+
+We can label topic as "sustaining Food Supply through Budgeting and Purchasing"
+
+Topic 2: Partner Reliance and Community Coordination
+Top terms: food, resource, partners, pantry, community, figure, difficult, people
+This topic shows organizations’ dependence on partner networks, food pantries, and community coordination to address gaps.
+We can label it community Collaboration and External Resource Navigation
+
+Topic 3: Urgency, Impact, and Emotional Strain
+Top terms: impact, source, spending, quantity, volume, tremendously, programs, participants, frustration, families, communicate
+This topic addresses the the emotional and operational impact of food insecurity and limited resources — particularly on participants and families. We can label it emotional and Operational Impact of Insecurity on Families
+
+Note we can do more than 3 themes but for the purpose of presentation I just selected 3.
+
+# Lets try to run a regression next- work in progress
+
+
+
