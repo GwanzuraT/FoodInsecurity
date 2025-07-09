@@ -74,7 +74,7 @@ names(data_all) <- toupper(names(data_all))
 #view(analytic.data2)
 
 variable_classes <- sapply(data_all, class)
-print(variable_classes)
+# print(variable_classes)
 
 ```
 
