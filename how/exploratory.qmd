@@ -1,0 +1,116 @@
+---
+title: "explore"
+format: html
+editor: visual
+---
+
+```{r map of SPAs with hofoco providers as dots on top}
+# Get lat/lon for zip codes
+zipcode_info <- zipcodeR::zip_code_db
+HFC_geo <- clean %>%
+  left_join(zipcode_info, by = c("Service Locations" = "zipcode")) %>% 
+  filter(!is.na(lat) & !is.na(lng))
+ # filter(lat >33.5)#remove weird island thing 
+
+# Load the shapefile of LA County Service Planning Areas
+spa_shapefile <- st_read("inputs/Service_Planning_Areas_(2022).shp")
+# Reproject to EPSG:4326 (WGS84, which is in degrees)
+#spa_shapefile <- st_transform(spa_shapefile, crs = 4326)
+#spa_shapefile <- spa_shapefile %>%
+#  mutate(lat_min = sapply(st_geometry(spa_shapefile), function(x) min(st_coordinates(x)[, 2])))
+
+# Filter out SPAs below a specific latitude (e.g., 33.5)
+#spa_shapefile_no_islands <- spa_shapefile %>%
+#  filter(lat_min > 33.5)
+
+
+# Step 1: Convert HFC_geo to an sf object (if it is not already)
+HFC_geo_sf <- st_as_sf(HFC_geo, coords = c("lng", "lat"), crs = 4326)
+
+# Step 2: Ensure both datasets are in the same CRS
+spa_map_crs <- st_crs(spa_shapefile)  # Get the CRS from the map data
+HFC_geo_sf <- st_transform(HFC_geo_sf, crs = spa_map_crs)  # Transform HFC_geo to match the CRS of the map
+
+# Step 3: Create the combined map with points
+spa_map_with_scatter <- ggplot(data = spa_shapefile) +
+  geom_sf(color = "black", fill = "transparent") +  # Draw the spatial map
+  geom_sf(data = HFC_geo_sf, aes(geometry = geometry), color = "#2980B9", size = 3, alpha = 0.7) +  # Add points
+  labs(title = "HoFoCo Providers", subtitle = "Overlayed on Los Angeles SPAs") + 
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),   # Remove grid lines
+    axis.text = element_blank(),    # Remove axis text (numbers)
+    axis.ticks = element_blank(),   # Remove axis ticks
+    axis.title = element_blank()    # Remove axis titles
+  )
+
+# View the combined map
+spa_map_with_scatter
+
+```
+
+```{r}
+# add some data from here: http://publichealth.lacounty.gov/ha/docs/2015lachs/keyindicator/ph-kih_2017-sec%20updated.pdf
+
+spa_shapefile_add = spa_shapefile %>% 
+  mutate(SNAP = c(39.8, 22.5, 17.9, 24.2, 11.4, 33.7, 28, 27.1),
+         foodinsec = c(34.4, 27.2, 21.8, 32, 30.5, 32.4, 32.4, 30.3), 
+         community = c(57.5, 63.7, 69.5, 60.3, 72.7, 54, 64.9, 66.2), 
+         eattogether = c(68.3, 57.3, 65.1, 58.7, 49.6, 65.7, 64.1, 64.5),
+         homeless = c(11.3, 3, 3.5, 4.3, 3, 9.9, 4.9, 5.5))
+  
+spa_map_with_scatter <- ggplot(data = spa_shapefile_add) +
+  geom_sf(aes(fill = homeless), color = "black", size = 0.2) + 
+  scale_fill_viridis_c(option = "plasma") + 
+  geom_sf(color = "black", fill = "transparent") +  # Draw the spatial map
+  geom_sf(data = HFC_geo_sf, aes(geometry = geometry), color = "green", size = 3, alpha = 0.3) +  # Add points
+  labs(title = "HoFoCo Providers", 
+       subtitle = "Overlayed on Los Angeles SPAs",
+       fill = "Percent of adults with housing instability") + 
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),   # Remove grid lines
+    axis.text = element_blank(),    # Remove axis text (numbers)
+    axis.ticks = element_blank(),   # Remove axis ticks
+    axis.title = element_blank()    # Remove axis titles
+  )
+
+# View the combined map
+spa_map_with_scatter
+```
+
+```{r}
+# Function to categorize the organization types
+categorize_org <- function(org_type) {
+  if (grepl("food|distro|pantry|meal|soup", tolower(org_type))) {
+    return("food")
+  } else if (grepl("housing|residential|shelter|home", tolower(org_type))) {
+    return("housing")
+  } else if (grepl("care|mental health|wraparound|recovery", tolower(org_type))) {
+    return("care")
+  } else {
+    return("other")
+  }
+}
+
+# Step 1: Apply the categorization to HFC_geo_sf dataset
+HFC_geo_sf$Category <- sapply(HFC_geo_sf$`Organization Type`, categorize_org)
+
+# Step 2: Create the map with colored points based on category
+spa_map_with_scatter <- ggplot(data = spa_shapefile) +
+  geom_sf(color = "black", fill = "transparent") +  # Draw the spatial map
+  geom_sf(data = HFC_geo_sf, aes(geometry = geometry, color = Category), size = 3, alpha = 0.7) +  # Add points, color by Category
+  scale_color_manual(values = c("food" = "#E74C3C", "housing" = "#2ECC71", "care" = "#F39C12", "other" = "#8E44AD")) +  # Custom colors for categories
+  labs(title = "HoFoCo Providers", subtitle = "Overlayed on Los Angeles SPAs", color = "Organization Category") + 
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),   # Remove grid lines
+    axis.text = element_blank(),    # Remove axis text (numbers)
+    axis.ticks = element_blank(),   # Remove axis ticks
+    axis.title = element_blank()    # Remove axis titles
+  )
+
+# View the combined map
+spa_map_with_scatter
+
+```
