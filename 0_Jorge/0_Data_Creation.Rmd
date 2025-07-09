@@ -1,0 +1,2312 @@
+---
+title: "0_Data_Creation"
+author: "Jorge Gonzalez Mejia"
+date: "2025-06-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+pacman::p_load(
+              tidyverse, 
+              here, 
+              broom, 
+              rlang, 
+              kableExtra, 
+              knitr, 
+              tableone, 
+              haven, 
+              dplyr, 
+              gtools, 
+              ggplot2, 
+              car, 
+              rio, 
+              pacman, 
+              tinytex, 
+              GGally, 
+              table1, 
+              ggpubr, 
+              epitools,
+              factoextra, 
+              VIM, 
+              tidyr, 
+              lmtest, 
+              sjstats, 
+              recoder,
+              forestplot, 
+              purrr, 
+              survey, 
+              weights,
+              plyr,
+              mice
+  )
+
+
+```
+
+
+********************************************************************************
+**1 Loading the Data and Variables of Interest**
+
+*1.1 Loading the dataset*
+
+```{r}
+
+data_all <- rio::import(here::here("data", "HFC_2025.xlsx"))
+
+```
+
+```{r}
+
+data_all <- as_tibble(data_all)
+
+```
+
+*1.2 Examining Varialbles*
+
+```{r}
+
+data_all <- janitor::clean_names(data_all)
+
+names(data_all) <- toupper(names(data_all))
+
+#view(analytic.data2)
+
+variable_classes <- sapply(data_all, class)
+print(variable_classes)
+
+```
+
+*1.3 Getting all the Varaibles in Excel format*
+
+```{r}
+
+# Name of the variables in dataset using the names function 
+# variable_names <- names(data_all)
+
+# Saving the variable names to a file
+# write.table(variable_names, here::here("data", "variable_names.csv") , row.names = FALSE, col.names = FALSE, quote=FALSE)
+
+
+# Reading the variable names from the file
+# variable_names <- read.table("variable_names.txt", header = FALSE, sep = "\t", stringsAsFactors = FALSE)
+
+
+```
+
+
+
+********************************************************************************
+**2 Visualizing Missingness**
+
+```{r}
+
+VIM::aggr(data_all)
+
+```
+
+ORGS and ONSITE Contact: 100% Missing, removing as part of cleaning. 
+
+```{r}
+
+data_all <- data_all %>%
+  select(-ORGS, -ON_SITE_CONTACT)
+
+data_all <- data_all[-1, ]
+
+```
+
+```{r}
+
+VIM::aggr(data_all)
+
+```
+
+
+```{r}
+
+data_all %>%
+  select(-ORG_ID) %>%
+  map(~ unique(.))
+
+```
+
+********************************************************************************
+**3 Data Cleaning**
+
+*3.1 Cleaning Date*
+
+DATE
+DAY
+MONTH
+YEAR
+
+```{r}
+library(lubridate)
+library(dplyr)
+
+data_all <- data_all %>%
+  mutate(
+    DAY = day(DATE),
+    MONTH = month(DATE),
+    YEAR = year(DATE)
+  )
+
+table(data_all$DAY)
+table(data_all$MONTH)
+table(data_all$YEAR)
+
+# test <- data_all %>%
+#   select(ORG_ID, DATE, DAY, MONTH, YEAR)
+
+```
+
+
+*3.2 Orgnaization Type*
+
+CATEGORY_SERVICE
+
+```{r}
+
+unique(trimws(data_all$ORGANIZATION_TYPE))
+
+```
+
+
+```{r}
+
+# table(data_all$ORGANIZATION_TYPE, useNA = "ifany")
+    
+data_all <- data_all %>%
+  mutate(
+    ORGANIZATION_TYPE_CLEAN = str_to_lower(ORGANIZATION_TYPE),
+    
+    ORG_TYPE_CAT_SERVICE = case_when(
+      str_detect(ORGANIZATION_TYPE_CLEAN, "(?i)food|meal|pantry|soup kitchen|food distribution|food bank|mutual aid|resource center") ~ "Food Services",
+      
+      str_detect(ORGANIZATION_TYPE_CLEAN, "(?i)housing|drop[- ]?in center|supportive housing|low[- ]income shared housing|tay housing|homeless services|board & care|shelter|transitional housing") ~ "Housing Services",
+      
+      str_detect(ORGANIZATION_TYPE_CLEAN, "(?i)advocacy|education|harm reduction|crisis response|on[- ]?street|case management|peer support|outreach") ~ "Advocacy & Support",
+      
+      str_detect(ORGANIZATION_TYPE_CLEAN, "(?i)mental health|recovery|wraparound|behavioral health|counseling|therapy") ~ "Mental Health & Recovery",
+      
+      str_detect(ORGANIZATION_TYPE_CLEAN, "(?i)discipleship|church|faith|spiritual|ministry") ~ "Spiritual",
+      
+      is.na(ORGANIZATION_TYPE_CLEAN) ~ NA_character_,
+      
+      TRUE ~ "Other"
+    )
+  )
+
+data_all$ORG_TYPE_CAT_SERVICE <- as.factor(data_all$ORG_TYPE_CAT_SERVICE)
+
+```
+
+
+```{r}
+
+table(data_all$ORG_TYPE_CAT_SERVICE, useNA = "ifany")
+
+```
+
+
+*3.3 Location*
+
+```{r}
+
+unique(trimws(data_all$LOCATION))
+
+```
+
+
+(?i) = case insensitive.
+
+LA_TIMES_REGION
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    LA_TIMES_REGION = case_when(
+      # Central LA
+      str_detect(LOCATION, "(?i)west adams|koreatown|macarthur park|downtown|westlake|mid-wilshire") ~ "Central LA",
+      
+      # Eastside
+      str_detect(LOCATION, "(?i)boyle heights|lincoln heights|eastside|east los angeles|echo park|silverlake") ~ "Eastside",
+      
+      # South LA
+      str_detect(LOCATION, "(?i)south central|leimert park|watts|baldwin hills|south los angeles") ~ "South LA",
+      
+      # Northeast LA
+      str_detect(LOCATION, "(?i)highland park|atwater village|cypress park|eagle rock|glassell park|mount washington") ~ "Northeast LA",
+      
+      # San Fernando Valley
+      str_detect(LOCATION, "(?i)north hollywood|san fernando|van nuys|canoga park|encino|tarzana|reseda") ~ "San Fernando Valley",
+      
+      # Westside
+      str_detect(LOCATION, "(?i)los feliz|west hollywood|westside|west la|santa monica|venice|brentwood") ~ "Westside",
+      
+      # Hollywood (falls within Central LA in Mapping L.A.)
+      str_detect(LOCATION, "(?i)hollywood") ~ "Central LA",
+      
+      # Outside Mapping LA (e.g., Glendale, Anaheim)
+      str_detect(LOCATION, "(?i)glendale|anaheim|orange county") ~ "Outside LA Mapping Areas",
+      
+      is.na(LOCATION) ~ NA_character_,
+      TRUE ~ "Other / Uncategorized"
+    )
+  )
+
+data_all$LA_TIMES_REGION <- as.factor(data_all$LA_TIMES_REGION)
+
+
+```
+
+```{r}
+
+
+table(data_all$LA_TIMES_REGION, useNA = "ifany")
+
+
+```
+
+SPAs
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    SPA_CATEGORY = case_when(
+      
+      # SPA 1: Antelope Valley
+      str_detect(LOCATION, regex("antelope valley|lancaster|palmdale", ignore_case = TRUE)) ~ "SPA 1 (Antelope Valley)",
+      
+      # SPA 2: San Fernando & Santa Clarita Valleys
+      str_detect(LOCATION, regex("san fernando|north hollywood|santa clarita|panorama city", ignore_case = TRUE)) ~ "SPA 2 (San Fernando & Santa Clarita Valley)",
+      
+      # SPA 3: San Gabriel Valley
+      str_detect(LOCATION, regex("san gabriel|pasadena|el monte|pomona|monrovia|alhambra", ignore_case = TRUE)) ~ "SPA 3 (San Gabriel Valley)",
+      
+      # SPA 4: Metro LA
+      str_detect(LOCATION, regex("hollywood|east hollywood|west hollywood|koreatown|macarthur park|downtown|westlake|silverlake|los feliz|atwater village|virgil|fountain", ignore_case = TRUE)) ~ "SPA 4 (Metro LA)",
+      
+      # SPA 5: West LA
+      str_detect(LOCATION, regex("west la|westwood|santa monica|venice|brentwood|culver city", ignore_case = TRUE)) ~ "SPA 5 (West LA)",
+      
+      # SPA 6: South LA
+      str_detect(LOCATION, regex("south la|south central|simaran & manchester", ignore_case = TRUE)) ~ "SPA 6 (South LA)",
+      
+      # SPA 7: East LA
+      str_detect(LOCATION, regex("boyle heights|lincoln heights|east la|montebello|commerce", ignore_case = TRUE)) ~ "SPA 7 (East LA)",
+      
+      # SPA 8: South Bay
+      str_detect(LOCATION, regex("south bay|long beach|torrance|inglewood|carson", ignore_case = TRUE)) ~ "SPA 8 (South Bay)",
+      
+      # Orange County or other areas (optional catch)
+      str_detect(LOCATION, regex("anaheim|orange county", ignore_case = TRUE)) ~ "Outside LA County",
+      
+      # Unmatched or missing
+      is.na(LOCATION) ~ NA_character_,
+      TRUE ~ "Uncategorized"
+    )
+  )
+
+
+data_all$SPA_CATEGORY <- as.factor(data_all$SPA_CATEGORY)
+
+```
+
+
+```{r}
+
+table(data_all$SPA_CATEGORY, useNA = "ifany")
+
+```
+
+*3.4 Hours of Operation*
+
+DAYS_PER_WEEK
+TIME_OF_DAY_CATEGORY
+
+```{r}
+
+unique(trimws(data_all$HOURS_OF_OPERATION))
+
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    HOURS_OF_OPERATION_CLEAN = str_to_lower(HOURS_OF_OPERATION),
+    HOURS_OF_OPERATION_CLEAN = if_else(str_detect(HOURS_OF_OPERATION_CLEAN, "^\\d+$|end of the school day|run out|^na$"), NA_character_, HOURS_OF_OPERATION_CLEAN),
+
+    DAYS_PER_WEEK = case_when(
+      is.na(HOURS_OF_OPERATION_CLEAN) ~ NA_integer_,
+      str_detect(HOURS_OF_OPERATION_CLEAN, "24/7|everyday|all week") ~ 7,
+      str_detect(HOURS_OF_OPERATION_CLEAN, "m-f") ~ 5,
+      TRUE ~ str_count(HOURS_OF_OPERATION_CLEAN, "mon|tue|wed|thu|fri|sat|sun")
+    )
+  )
+  
+
+table(data_all$DAYS_PER_WEEK, useNA = "ifany")
+
+
+# test <- data_all %>%
+#  select(ORG_ID, HOURS_OF_OPERATION, DAYS_PER_WEEK)
+
+
+data_all <- data_all %>%
+  mutate(
+    HOURS_OF_OPERATION_CLEAN = str_to_lower(HOURS_OF_OPERATION),
+
+    TIME_OF_DAY_CATEGORY = case_when(
+      str_detect(HOURS_OF_OPERATION_CLEAN, "(?i)24/7|all day|all week|7am-7pm|8am-4pm|7am-4pm|m-f 9-5|school day|9:30-2:30") ~ "All Day",
+      
+      str_detect(HOURS_OF_OPERATION_CLEAN, "(?i)6am|7am|8am|9am|10am|11am|11:30am|morning|9-12") ~ "Morning",
+      
+      str_detect(HOURS_OF_OPERATION_CLEAN, "(?i)12pm|1pm|2pm|3pm|4pm|5pm|6pm|7pm|8pm|9pm|10pm|evening|12-1") ~ "Afternoon",
+
+      is.na(HOURS_OF_OPERATION_CLEAN) |
+        str_detect(HOURS_OF_OPERATION_CLEAN, "(?i)^\\d+$|run out") ~ NA_character_,
+
+      TRUE ~ "Unspecified"
+    )
+  )
+
+table(data_all$TIME_OF_DAY_CATEGORY, useNA = "ifany")
+
+
+# test <- data_all %>%
+#  select(ORG_ID, HOURS_OF_OPERATION, DAYS_PER_WEEK, TIME_OF_DAY_CATEGORY)
+
+```
+
+
+
+*3.5 metrics*
+
+Left as is
+
+*3.6 Volunteer Run Organization*
+
+Left as is
+
+
+*3.7 Weekly Services*
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    UNIQUE_INDIVIDUALS_SERVED_WEEKLY_CAT = case_when(
+      is.na(UNIQUE_INDIVIDUALS_SERVED_WEEKLY) ~ NA_character_,
+      UNIQUE_INDIVIDUALS_SERVED_WEEKLY <= 250 ~ "1–250",
+      UNIQUE_INDIVIDUALS_SERVED_WEEKLY <= 500 ~ "251–500",
+      UNIQUE_INDIVIDUALS_SERVED_WEEKLY <= 750 ~ "501–750",
+      UNIQUE_INDIVIDUALS_SERVED_WEEKLY <= 1000 ~ "751–1000",
+      TRUE ~ "1000+"
+    ),
+
+    TOTAL_SERVED_WEEKLY_CAT = case_when(
+      is.na(TOTAL_SERVED_WEEKLY) ~ NA_character_,
+      TOTAL_SERVED_WEEKLY <= 250 ~ "1–250",
+      TOTAL_SERVED_WEEKLY<= 500 ~ "251–500",
+      TOTAL_SERVED_WEEKLY <= 750 ~ "501–750",
+      TOTAL_SERVED_WEEKLY <= 1000 ~ "751–1000",
+      TRUE ~ "1000+"
+    )
+  )
+
+table(data_all$UNIQUE_INDIVIDUALS_SERVED_WEEKLY_CAT, useNA = "ifany")
+table(data_all$TOTAL_SERVED_WEEKLY_CAT, useNA = "ifany")
+
+
+
+```
+
+The vast majority of orgs fall on the diagonal (e.g., 1–250 unique + 1–250 total, 251–500 + 251–500, 501–750 + 501–750).This means most org report little duplication (i.e., people are counted only once per week).
+
+```{r}
+
+table(data_all$UNIQUE_INDIVIDUALS_SERVED_WEEKLY_CAT, data_all$TOTAL_SERVED_WEEKLY_CAT, useNA = "ifany")
+
+```
+
+Heatmap 
+
+```{r}
+
+# # Create the cross-tab
+# heat_table <- table(data_all$UNIQUE_INDIVIDUALS_SERVED_WEEKLY_CAT, data_all$TOTAL_SERVED_WEEKLY_CAT)
+# 
+# # Convert to data frame
+# heat_df <- as.data.frame(heat_table)
+# 
+# colnames(heat_df) <- c("UniqueServed", "TotalServed", "Count")
+# 
+# bin_levels <- c("1–250", "251–500", "501–750", "751–1000", "1000+")
+# 
+# heat_df <- heat_df %>%
+#   mutate(
+#     UniqueServed = factor(UniqueServed, levels = bin_levels, ordered = TRUE),
+#     TotalServed = factor(TotalServed, levels = bin_levels, ordered = TRUE)
+#   )
+# 
+
+
+# ggplot(heat_df, aes(x = TotalServed, y = UniqueServed, fill = Count)) +
+#   geom_tile(color = "white") +
+#   scale_fill_gradientn(
+#     colors = c("#e0f3f8", "#abd9e9", "#74add1", "#4575b4", "#313695"),
+#     name = "Number of Orgs"
+#   ) +
+#   labs(
+#     title = "Heatmap of Unique vs. Total Individuals Served Weekly",
+#     x = "Total Individuals Served (Binned)",
+#     y = "Unique Individuals Served (Binned)",
+#     fill = "Number of Orgs"
+#   ) +
+#   theme_minimal() +
+#   theme(
+#     axis.text.x = element_text(angle = 45, hjust = 1),
+#     panel.grid = element_blank()
+#   )
+
+
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(WEEKLY_GAP = TOTAL_SERVED_WEEKLY - UNIQUE_INDIVIDUALS_SERVED_WEEKLY)
+
+data_all <- data_all %>%
+  mutate(
+    WEEKLY_GAP_LEVEL = case_when(
+      is.na(WEEKLY_GAP) ~ "Missing",
+      WEEKLY_GAP < 0 ~ "Data issue (total < unique)",
+      WEEKLY_GAP == 0 ~ "No repeat",
+      WEEKLY_GAP <= 100 ~ "Low repeat",
+      WEEKLY_GAP <= 500 ~ "Medium repeat",
+      TRUE ~ "High repeat"
+    )
+  )
+
+table(data_all$WEEKLY_GAP_LEVEL, useNA = "ifany")
+
+```
+
+
+
+*3.8 Monthly Services*
+
+```{r}
+
+unique(trimws(data_all$UNIQUE_INDIVIDUALS_SERVED_MONTHLY))
+
+unique(trimws(data_all$TOTAL_SERVED_MONTHLY))
+
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    UNIQUE_INDIVIDUALS_SERVED_MONTHLY_CAT = case_when(
+      is.na(UNIQUE_INDIVIDUALS_SERVED_MONTHLY) ~ NA_character_,
+      UNIQUE_INDIVIDUALS_SERVED_MONTHLY <= 250 ~ "1–250",
+      UNIQUE_INDIVIDUALS_SERVED_MONTHLY <= 500 ~ "251–500",
+      UNIQUE_INDIVIDUALS_SERVED_MONTHLY<= 750 ~ "501–750",
+      UNIQUE_INDIVIDUALS_SERVED_MONTHLY <= 1000 ~ "751–1000",
+      TRUE ~ "1000+"
+    ),
+
+    TOTAL_SERVED_MONTHLY_CAT = case_when(
+      is.na(TOTAL_SERVED_MONTHLY) ~ NA_character_,
+      TOTAL_SERVED_MONTHLY <= 250 ~ "1–250",
+      TOTAL_SERVED_MONTHLY <= 500 ~ "251–500",
+      TOTAL_SERVED_MONTHLY <= 750 ~ "501–750",
+      TOTAL_SERVED_MONTHLY <= 1000 ~ "751–1000",
+      TRUE ~ "1000+"
+    )
+  )
+
+table(data_all$UNIQUE_INDIVIDUALS_SERVED_MONTHLY_CAT, useNA = "ifany")
+table(data_all$TOTAL_SERVED_MONTHLY_CAT, useNA = "ifany")
+
+
+```
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(MONTHLY_GAP = TOTAL_SERVED_MONTHLY - UNIQUE_INDIVIDUALS_SERVED_MONTHLY)
+
+data_all <- data_all %>%
+  mutate(
+    MONTHLY_GAP_LEVEL = case_when(
+      is.na(MONTHLY_GAP) ~ "Missing",
+      MONTHLY_GAP < 0 ~ "Data issue (total < unique)",
+      MONTHLY_GAP == 0 ~ "No repeat",
+      MONTHLY_GAP <= 100 ~ "Low repeat",
+      MONTHLY_GAP <= 500 ~ "Medium repeat",
+      TRUE ~ "High repeat"
+    )
+  )
+
+table(data_all$MONTHLY_GAP_LEVEL, useNA = "ifany")
+
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    AVG_SERVICES_PER_PERSON_WEEKLY = TOTAL_SERVED_WEEKLY / UNIQUE_INDIVIDUALS_SERVED_WEEKLY,
+    AVG_SERVICES_PER_PERSON_MONTHLY = TOTAL_SERVED_MONTHLY / UNIQUE_INDIVIDUALS_SERVED_MONTHLY
+  )
+
+
+summary(data_all$AVG_SERVICES_PER_PERSON_WEEKLY)
+summary(data_all$AVG_SERVICES_PER_PERSON_MONTHLY)
+
+```
+
+
+Most individuals come once per week, but some organizations are seeing people multiple times, up to 7 visits per week — daily service in some cases.
+
+Most individuals come once per week, but some organizations are seeing people multiple times, up to 7 visits per week — daily service in some cases.
+
+This shows that services are not just accessed once — they’re integrated into the lives of those we serve
+
+
+```{r}
+
+# library(ggplot2)
+# 
+# plot1 <- data_all %>%
+#   filter(AVG_SERVICES_PER_PERSON_MONTHLY != 0)
+# 
+#   
+# ggplot(plot1, aes(x = AVG_SERVICES_PER_PERSON_MONTHLY)) +
+#   geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
+#   labs(
+#     title = "Average Services per Person (Monthly)",
+#     x = "Average Monthly Services per Person",
+#     y = "Number of Organizations"
+#   ) +
+#   scale_y_continuous(limits = c(0, 10), breaks = 0:10) +
+#   scale_x_continuous(limits = c(0, 15), breaks = 0:15) +
+#   theme_bw()
+
+```
+
+
+
+```{r}
+
+# plot2 <- data_all %>%
+#   filter(!is.na(CATEGORY_SERVICE) & CATEGORY_SERVICE != "Other") %>%
+#   dplyr::group_by(CATEGORY_SERVICE) %>%
+#   dplyr::summarise(MEAN_SERVICES = mean(AVG_SERVICES_PER_PERSON_MONTHLY, na.rm = TRUE)
+#   )
+# 
+# ggplot(plot2, aes(x = CATEGORY_SERVICE, y = MEAN_SERVICES)) +
+#   geom_col(fill = "steelblue") +
+#   labs(
+#     title = "Mean Monthly Services per Person by Organization Type",
+#     x = "Organization Type",
+#     y = "Mean Monthly Services Per Person"
+#   ) +
+#   scale_y_continuous(limits = c(0, 10), breaks = 0:10) +
+#   theme_bw() +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+*3.9 Range of Population Served*
+
+```{r}
+
+unique(trimws(data_all$AGE_RANGE_OF_POPULATION_SERVED))
+
+```
+
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    AGE_RANGE_CLEAN = str_to_lower(str_trim(AGE_RANGE_OF_POPULATION_SERVED)),  # replace AGE_RANGE_COLUMN with your column name
+    AGE_RANGE_CLEAN = str_replace_all(AGE_RANGE_CLEAN, "\\s+", ""),  # remove spaces like "18- 70+"
+
+    # Extract min and max ages (if present)
+    AGE_MIN = str_extract(AGE_RANGE_CLEAN, "^\\d+"),
+    AGE_MAX = str_extract(AGE_RANGE_CLEAN, "(?<=-)\\d+"),
+    
+    AGE_MIN = as.numeric(AGE_MIN),
+    AGE_MAX = as.numeric(AGE_MAX),
+
+    # Assign age groups (allowing overlap)
+    AGE_GROUP = case_when(
+      str_detect(AGE_RANGE_CLEAN, "under18") | (!is.na(AGE_MIN) & AGE_MIN < 18) ~ "Youth",
+      (!is.na(AGE_MIN) & AGE_MIN <= 34 & (is.na(AGE_MAX) | AGE_MAX >= 18)) ~ "Young Adults",
+      (!is.na(AGE_MIN) & AGE_MIN <= 64 & (is.na(AGE_MAX) | AGE_MAX >= 35)) ~ "Adults",
+      (!is.na(AGE_MIN) & AGE_MIN >= 65) | str_detect(AGE_RANGE_CLEAN, "65\\+|70\\+|75\\+|80\\+|90\\+") ~ "Older Adults",
+      TRUE ~ NA_character_
+    )
+  )
+
+table(data_all$AGE_GROUP, useNA = "ifany")
+
+```
+
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    AGE_RANGE_CLEAN = str_to_lower(str_trim(AGE_RANGE_OF_POPULATION_SERVED)),
+    AGE_RANGE_CLEAN = str_replace_all(AGE_RANGE_CLEAN, "\\s+", ""),  # remove all whitespace
+
+    # Extract lower bound (e.g., from "18+" or "18-70+")
+    AGE_MIN = as.numeric(str_extract(AGE_RANGE_CLEAN, "^\\d+")),
+
+    # Extract upper bound (if it exists)
+    AGE_MAX = str_extract(AGE_RANGE_CLEAN, "-(\\d+)", group = 1),
+    AGE_MAX = if_else(
+      str_detect(AGE_RANGE_CLEAN, "\\+"), "120", AGE_MAX
+    ),
+    AGE_MAX = as.numeric(AGE_MAX),
+
+    # If string ends in "+" but no dash exists, e.g. "18+", force max to 120
+    AGE_MAX = if_else(
+      is.na(AGE_MAX) & str_detect(AGE_RANGE_CLEAN, "^\\d+\\+"), 120, AGE_MAX
+    )
+  ) %>%
+  mutate(
+    AGE_YOUTH = if_else(!is.na(AGE_MIN) & !is.na(AGE_MAX) & AGE_MIN <= 17 & AGE_MAX >= 0, 1L,
+                        if_else(!is.na(AGE_MIN) & AGE_MIN <= 17 & is.na(AGE_MAX), 1L, 0L)),
+    
+    AGE_YOUNG_ADULTS = if_else(!is.na(AGE_MIN) & !is.na(AGE_MAX) & AGE_MIN <= 34 & AGE_MAX >= 18, 1L, 0L),
+    AGE_ADULTS = if_else(!is.na(AGE_MIN) & !is.na(AGE_MAX) & AGE_MIN <= 64 & AGE_MAX >= 35, 1L, 0L),
+    AGE_OLDER_ADULTS = if_else(!is.na(AGE_MIN) & !is.na(AGE_MAX) & AGE_MAX >= 65, 1L, 0L)
+  )
+
+
+```
+
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    AGE_YOUTH = case_when(
+      str_detect(AGE_RANGE_CLEAN, "under 18 and families|^0\\+|^0-\\d+\\+?$") ~ 1L,
+      str_detect(AGE_RANGE_CLEAN, "^\\d{4,}$") ~ NA_integer_,
+      is.na(AGE_RANGE_CLEAN) ~ NA_integer_,
+      TRUE ~ AGE_YOUTH
+    ),
+    AGE_YOUNG_ADULTS = case_when(
+      str_detect(AGE_RANGE_CLEAN, "under 18 and families|^0\\+|^0-\\d+\\+?$") ~ 1L,
+      str_detect(AGE_RANGE_CLEAN, "^\\d{4,}$") ~ NA_integer_,
+      is.na(AGE_RANGE_CLEAN) ~ NA_integer_,
+      TRUE ~ AGE_YOUNG_ADULTS
+    ),
+    AGE_ADULTS = case_when(
+      str_detect(AGE_RANGE_CLEAN, "under 18 and families|^0\\+|^0-\\d+\\+?$") ~ 1L,
+      str_detect(AGE_RANGE_CLEAN, "^\\d{4,}$") ~ NA_integer_,
+      is.na(AGE_RANGE_CLEAN) ~ NA_integer_,
+      TRUE ~ AGE_ADULTS
+    ),
+    AGE_OLDER_ADULTS = case_when(
+      str_detect(AGE_RANGE_CLEAN, "under 18 and families|^0\\+|^0-\\d+\\+?$") ~ 1L,
+      str_detect(AGE_RANGE_CLEAN, "^\\d{4,}$") ~ NA_integer_,
+      is.na(AGE_RANGE_CLEAN) ~ NA_integer_,
+      TRUE ~ AGE_OLDER_ADULTS
+    )
+  )
+
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    AGE_MULTIPLE_GROUPS = case_when(
+      rowSums(select(., AGE_YOUTH, AGE_YOUNG_ADULTS, AGE_ADULTS, AGE_OLDER_ADULTS), na.rm = TRUE) > 1 ~ 1,
+      rowSums(select(., AGE_YOUTH, AGE_YOUNG_ADULTS, AGE_ADULTS, AGE_OLDER_ADULTS), na.rm = TRUE) == 1 ~ 0,
+      TRUE ~ NA_real_
+    )
+  )
+
+```
+
+
+```{r}
+
+# # Count the values of AGE_MULTIPLE_GROUPS
+# age_pie <- data_all %>%
+#   dplyr::count(AGE_MULTIPLE_GROUPS) %>%
+#   filter(!is.na(AGE_MULTIPLE_GROUPS)) %>%
+#   mutate(
+#     prop = n / sum(n),
+#     label = paste0(AGE_MULTIPLE_GROUPS, " (", scales::percent(prop), ")")
+#   )
+# 
+# # Create pie chart
+# ggplot(age_pie, aes(x = "", y = prop, fill = AGE_MULTIPLE_GROUPS)) +
+#   geom_col(width = 1, color = "white") +
+#   coord_polar(theta = "y") +
+#   labs(
+#     title = "Distribution of Age Group Coverage",
+#     fill = "Multiple Age Groups"
+#   ) +
+#   geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 4) +
+#   theme_void()
+
+```
+
+
+```{r}
+
+
+# test <- data_all%>%
+#   select(AGE_RANGE_OF_POPULATION_SERVED, AGE_YOUTH, AGE_YOUNG_ADULTS, AGE_ADULTS, AGE_OLDER_ADULTS)
+
+
+```
+
+
+```{r}
+
+test_long <- data_all %>%
+  select(AGE_YOUTH, AGE_YOUNG_ADULTS, AGE_ADULTS, AGE_OLDER_ADULTS) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "Age_Group",
+    values_to = "Serves"
+  ) %>%
+  filter(Serves == 1) %>%
+  dplyr::count(Age_Group) %>%
+  mutate(
+    Age_Group_Label = case_when(
+      Age_Group == "AGE_YOUTH" ~ "0–17",
+      Age_Group == "AGE_YOUNG_ADULTS" ~ "18–34",
+      Age_Group == "AGE_ADULTS" ~ "35–64",
+      Age_Group == "AGE_OLDER_ADULTS" ~ "65+"
+    ),
+    Age_Group_Label = factor(Age_Group_Label, levels = c("0–17", "18–34", "35–64", "65+"))
+  )
+
+ggplot(test_long, aes(x = Age_Group_Label, y = n)) +
+  geom_col(fill = "steelblue") +
+  labs(
+    title = "Number of Organizations Serving Each Age Group",
+    x = "Age Group Served",
+    y = "Number of Organizations"
+  ) +
+  theme_bw()
+
+```
+
+
+*Other Age Variables*
+
+```{r}
+
+unique(trimws(data_all$UNDER_18_POPULATION_PERCENTAGE))
+
+data_all <- data_all %>%
+  mutate(
+    AGE_UNDER_18_PCT = as.numeric(UNDER_18_POPULATION_PERCENTAGE) * 100)
+
+table(data_all$UNDER_18_POPULATION_PERCENTAGE, useNA = "ifany")
+table(data_all$AGE_UNDER_18_PCT, useNA = "ifany")
+
+```
+
+```{r}
+
+unique(trimws(data_all$X18_25_POPULATION_PERCENTAGE))
+
+data_all <- data_all %>%
+  mutate(
+    AGE_18_25_PCT = as.numeric(X18_25_POPULATION_PERCENTAGE) * 100)
+
+table(data_all$X18_25_POPULATION_PERCENTAGE, useNA = "ifany")
+table(data_all$AGE_18_25_PCT, useNA = "ifany")
+
+```
+
+```{r}
+
+unique(trimws(data_all$X26_40_POPULATION_PERCENTAGE))
+
+data_all <- data_all %>%
+  mutate(
+    AGE_26_40_PCT = as.numeric(X26_40_POPULATION_PERCENTAGE) * 100)
+
+table(data_all$X26_40_POPULATION_PERCENTAGE, useNA = "ifany")
+table(data_all$AGE_26_40_PCT, useNA = "ifany")
+
+```
+
+
+```{r}
+
+unique(trimws(data_all$X41_65_POPULATION_PERCENTAGE))
+
+
+data_all <- data_all %>%
+  mutate(
+    AGE_41_65_PCT = as.numeric(X41_65_POPULATION_PERCENTAGE) * 100
+  )
+
+
+table(data_all$X41_65_POPULATION_PERCENTAGE, useNA = "ifany")
+table(data_all$AGE_41_65_PCT, useNA = "ifany")
+```
+
+
+```{r}
+
+unique(trimws(data_all$X65_POPULATION_PERCENTAGE))
+
+
+data_all <- data_all %>%
+  mutate(
+    AGE_65_PLUS_PCT = as.numeric(X65_POPULATION_PERCENTAGE) * 100
+  )
+
+
+table(data_all$X65_POPULATION_PERCENTAGE, useNA = "ifany")
+table(data_all$AGE_65_PLUS_PCT, useNA = "ifany")
+```
+
+
+*4.0 Racial Makeup*
+
+```{r}
+
+unique(trimws(data_all$RACIAL_MAKEUP_OF_POPULATION_SERVED))
+       
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    RACIAL_CLEAN = str_to_lower(RACIAL_MAKEUP_OF_POPULATION_SERVED),
+    RACIAL_CLEAN = str_replace_all(RACIAL_CLEAN, "[[:punct:]]", ""),  # remove punctuation
+    RACIAL_CLEAN = str_squish(RACIAL_CLEAN),
+
+    # Group flags
+    INCLUDES_BLACK = if_else(str_detect(RACIAL_CLEAN, "black|african|brown"), 1, 0),
+    INCLUDES_LATINO = if_else(str_detect(RACIAL_CLEAN, "latino|hispanic|colombian|salvadorian|venezulian|brown"), 1, 0),
+    INCLUDES_WHITE = if_else(str_detect(RACIAL_CLEAN, "white"), 1, 0),
+    INCLUDES_ASIAN = if_else(str_detect(RACIAL_CLEAN, "asian|filipino|korean|api|chinese|japanese|vietnamese"), 1, 0),
+    INCLUDES_OTHER = if_else(str_detect(RACIAL_CLEAN, "other|mixed|multi|armenian|russian|arab|no one race|bipoc"), 1, 0),
+
+    # Count the number of race/ethnicity groups present
+    DIVERSITY_SCORE = INCLUDES_BLACK + INCLUDES_LATINO + INCLUDES_WHITE + INCLUDES_ASIAN + INCLUDES_OTHER)
+
+```
+
+```{r}
+
+# table(data_all$DIVERSITY_SCORE, useNA = "ifany")
+
+# test <- data_all%>%
+#   select(RACIAL_MAKEUP_OF_POPULATION_SERVED, DIVERSITY_SCORE, INCLUDES_BLACK, INCLUDES_LATINO, INCLUDES_WHITE, INCLUDES_ASIAN, INCLUDES_OTHER)
+
+```
+
+
+*4.1 Percentage of low income pop served*
+
+```{r}
+
+unique(trimws(data_all$PERCENTAGE_OF_LOW_INCOME_POPULATION_SERVED))
+table(data_all$PERCENTAGE_OF_LOW_INCOME_POPULATION_SERVED)
+
+```
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+   PCT_LOW_INCOME_SERVED = as.numeric(PERCENTAGE_OF_LOW_INCOME_POPULATION_SERVED) * 100)
+# 
+# test <- data_all%>%
+#   select(PERCENTAGE_OF_LOW_INCOME_POPULATION_SERVED_NUMERIC)
+
+```
+
+
+*4.1 Languages*
+
+
+```{r}
+
+unique(trimws(data_all$POPULATION_LANGUAGES))
+table(data_all$POPULATION_LANGUAGES)
+
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    # Step 1: Trim whitespace and standardize case
+    POP_LANG_CLEAN = str_to_title(trimws(POPULATION_LANGUAGES)),
+
+    # Step 2: Replace multiple spaces or stray punctuation
+    POP_LANG_CLEAN = str_replace_all(POP_LANG_CLEAN, "\\s*,\\s*", ", "),
+    POP_LANG_CLEAN = str_replace_all(POP_LANG_CLEAN, "\\s+", " ")
+  )
+
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    LANG_SPANISH = if_else(str_detect(POP_LANG_CLEAN, "Spanish"), 1L, 0L),
+    LANG_ENGLISH = if_else(str_detect(POP_LANG_CLEAN, "English"), 1L, 0L),
+    LANG_RUSSIAN = if_else(str_detect(POP_LANG_CLEAN, "Russian"), 1L, 0L),
+    LANG_KOREAN  = if_else(str_detect(POP_LANG_CLEAN, "Korean"), 1L, 0L),
+    LANG_CHINESE = if_else(str_detect(POP_LANG_CLEAN, "Chinese|Mandarin|Cantonese"), 1L, 0L),
+    LANG_ARABIC  = if_else(str_detect(POP_LANG_CLEAN, "Arabic"), 1L, 0L),
+    LANG_TAGALOG = if_else(str_detect(POP_LANG_CLEAN, "Tagalog"), 1L, 0L),
+    LANG_ARMENIAN= if_else(str_detect(POP_LANG_CLEAN, "Armenian"), 1L, 0L),
+    LANG_VIETNAMESE = if_else(str_detect(POP_LANG_CLEAN, "Vietnamese"), 1L, 0L),
+    LANG_FRENCH  = if_else(str_detect(POP_LANG_CLEAN, "French"), 1L, 0L),
+    LANG_OTHER   = if_else(!is.na(POP_LANG_CLEAN) & 
+                           !str_detect(POP_LANG_CLEAN, "Spanish|English|Russian|Korean|Chinese|Mandarin|Cantonese|Arabic|Tagalog|Armenian|Vietnamese|French"), 1L, 0L)
+  )
+               
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    LANGUAGE_DIVERSITY_SCORE = if_else(
+      is.na(POP_LANG_CLEAN),
+      NA_integer_,
+      str_count(POP_LANG_CLEAN, ",") + 1
+    )
+  )
+
+table(data_all$LANGUAGE_DIVERSITY_SCORE)
+
+```
+
+
+*4.2 Sex and Gender* 
+
+```{r}
+
+unique(trimws(data_all$MALE_GENDER_MAKE_UP))
+table(data_all$MALE_GENDER_MAKE_UP)
+
+data_all <- data_all %>%
+  mutate(
+   PCT_GENDER_MALE = as.numeric(MALE_GENDER_MAKE_UP) * 100)
+
+
+table(data_all$PCT_GENDER_MALE)
+
+```
+
+```{r}
+
+unique(trimws(data_all$FEMALE_GENDER_MAKE_UP))
+table(data_all$FEMALE_GENDER_MAKE_UP, useNA = "ifany")
+
+data_all <- data_all %>%
+  mutate(
+    PCT_GENDER_FEMALE = as.numeric(FEMALE_GENDER_MAKE_UP) * 100
+  )
+
+table(data_all$PCT_GENDER_FEMALE, useNA = "ifany")
+
+```
+
+
+```{r}
+
+unique(trimws(data_all$NON_BINARY_GENDER_MAKE_UP))
+table(data_all$NON_BINARY_GENDER_MAKE_UP, useNA = "ifany")
+
+data_all <- data_all %>%
+  mutate(
+    PCT_GENDER_NON_BINARY = as.numeric(NON_BINARY_GENDER_MAKE_UP) * 100
+  )
+
+table(data_all$PCT_GENDER_NON_BINARY, useNA = "ifany")
+
+```
+
+
+```{r}
+
+unique(trimws(data_all$TRANSGENDER_GENDER_MAKE_UP))
+table(data_all$TRANSGENDER_GENDER_MAKE_UP, useNA = "ifany")
+
+data_all <- data_all %>%
+  mutate(
+    PCT_GENDER_TRANSGENDER = as.numeric(TRANSGENDER_GENDER_MAKE_UP) * 100
+  )
+
+table(data_all$PCT_GENDER_TRANSGENDER, useNA = "ifany")
+
+```
+
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    GENDER_DIVERSE = case_when(
+      is.na(PCT_GENDER_NON_BINARY) & is.na(PCT_GENDER_TRANSGENDER) ~ NA_integer_,
+      (PCT_GENDER_NON_BINARY > 0 | PCT_GENDER_TRANSGENDER > 0) ~ 1L,
+      TRUE ~ 0L
+    ),
+    
+    GENDER_PREDOMINANTLY_FEMALE = case_when(
+      is.na(PCT_GENDER_FEMALE) ~ NA_integer_,
+      PCT_GENDER_FEMALE >= 50 ~ 1L,
+      TRUE ~ 0L
+    ),
+    
+    GENDER_PREDOMINANTLY_MALE = case_when(
+      is.na(PCT_GENDER_MALE) ~ NA_integer_,
+      PCT_GENDER_MALE >= 50 ~ 1L,
+      TRUE ~ 0L
+    ),
+    
+    GENDER_BALANCED = case_when(
+      is.na(PCT_GENDER_FEMALE) | is.na(PCT_GENDER_MALE) ~ NA_integer_,
+      abs(PCT_GENDER_FEMALE - PCT_GENDER_MALE) <= 10 &
+        (is.na(PCT_GENDER_NON_BINARY) | PCT_GENDER_NON_BINARY == 0) &
+        (is.na(PCT_GENDER_TRANSGENDER) | PCT_GENDER_TRANSGENDER == 0) ~ 1L,
+      TRUE ~ 0L
+    )
+  )
+
+table(data_all$GENDER_DIVERSE) 
+table(data_all$GENDER_PREDOMINANTLY_FEMALE, useNA = "ifany") 
+table(data_all$GENDER_PREDOMINANTLY_MALE, useNA = "ifany") 
+table(data_all$GENDER_BALANCED, useNA = "ifany") 
+
+data_all <- data_all %>%
+  mutate(
+    GENDER_CATEGORY = case_when(
+      GENDER_BALANCED == 1 ~ "Balanced",
+      GENDER_PREDOMINANTLY_FEMALE == 1 ~ ">50 PCT Female",
+      GENDER_PREDOMINANTLY_MALE == 1 ~ ">50 PCT Male",
+      is.na(PCT_GENDER_FEMALE) & is.na(PCT_GENDER_MALE) ~ NA_character_,
+      TRUE ~ "Unclassified"
+    )
+  )
+
+data_all <- data_all %>%
+  mutate(
+    GENDER_CATEGORY = case_when(
+      ORG_ID == 126 ~ "Balanced",
+      ORG_ID == 114 ~ ">50 PCT Male",
+      TRUE ~ GENDER_CATEGORY),
+  GENDER_PREDOMINANTLY_MALE = case_when(
+      ORG_ID == 114 ~ 1L,
+      TRUE ~ GENDER_PREDOMINANTLY_MALE)
+  
+    )
+  
+
+test <- data_all %>%
+  select(FEMALE_GENDER_MAKE_UP, MALE_GENDER_MAKE_UP, GENDER_PREDOMINANTLY_FEMALE, GENDER_PREDOMINANTLY_MALE, GENDER_CATEGORY)
+
+
+table(data_all$GENDER_CATEGORY, useNA = "ifany")
+
+```
+
+*4.3 Veterans Served* 
+
+```{r}
+
+unique(trimws(data_all$VETERANS_SERVED))
+table(data_all$VETERANS_SERVED, useNA = "ifany")
+
+data_all <- data_all %>%
+  mutate(
+    PCT_VETERANS_SERVED = as.numeric(VETERANS_SERVED) * 100
+  )
+
+table(data_all$PCT_VETERANS_SERVED, useNA = "ifany")
+
+```
+
+
+*4.4 Previously incarcerated* 
+
+```{r}
+
+unique(trimws(data_all$PREVIOUSLY_INCARCERATED))
+table(data_all$PREVIOUSLY_INCARCERATED, useNA = "ifany")
+
+data_all <- data_all %>%
+  mutate(
+    PCT_PREV_INCARCERATED = as.numeric(PREVIOUSLY_INCARCERATED) * 100
+  )
+
+table(data_all$PCT_PREV_INCARCERATED, useNA = "ifany")
+
+```
+
+*4.5 LGBTQ* 
+
+```{r}
+
+unique(trimws(data_all$LBGTQ))
+
+table(data_all$LBGTQ, useNA = "ifany")
+
+data_all <- data_all %>%
+  mutate(
+    PCT_LGBTQ = as.numeric(LBGTQ) * 100
+  )
+
+table(data_all$PCT_LGBTQ, useNA = "ifany")
+
+```
+
+
+*4.5 Unhoused* 
+
+```{r}
+
+unique(trimws(data_all$UNHOUSED))
+
+table(data_all$UNHOUSED, useNA = "ifany")
+
+data_all <- data_all %>%
+  mutate(
+    PCT_UNHOUSED = as.numeric(UNHOUSED) * 100)
+
+table(data_all$PCT_UNHOUSED, useNA = "ifany")
+
+
+data_all <- data_all %>%
+  mutate(
+    PCT_UNHOUSED_CATEGORY = case_when(
+      is.na(PCT_UNHOUSED) ~ NA_character_,
+      PCT_UNHOUSED <= 25 ~ "0–25%",
+      PCT_UNHOUSED <= 50 ~ "26–50%",
+      PCT_UNHOUSED <= 75 ~ "51–75%",
+      PCT_UNHOUSED <= 100 ~ "76–100%",
+      TRUE ~ "Other"
+    )
+  )
+
+table(data_all$PCT_UNHOUSED_CATEGORY, useNA = "ifany")
+
+```
+
+*4.6 Program Entry Food Restrictions* 
+
+```{r}
+
+unique(trimws(data_all$PROGRAM_ENTRY_FOOD_RESTRICTIONS))
+
+data_all <- data_all %>%
+  dplyr::rename(Q_PROGRAM_ENTRY_FOOD_RESTRICTIONS = PROGRAM_ENTRY_FOOD_RESTRICTIONS)
+
+```
+
+*4.7 Primary demographics*
+
+```{r}
+
+unique(trimws(data_all$PRIMARY_DEMOGRAPHICS))
+
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    DEMO_CLEAN = str_to_lower(str_trim(PRIMARY_DEMOGRAPHICS)),
+
+    DEMO_UNHOUSED = if_else(str_detect(DEMO_CLEAN, "unhoused"), 1L, 0L),
+    DEMO_IMMIGRANT = if_else(str_detect(DEMO_CLEAN, "immigrant"), 1L, 0L),
+    DEMO_LGBTQ = if_else(str_detect(DEMO_CLEAN, "lgbtq"), 1L, 0L),
+    DEMO_ADULT = if_else(str_detect(DEMO_CLEAN, "adults? \\(26-64\\)"), 1L, 0L),
+    DEMO_ELDERLY = if_else(str_detect(DEMO_CLEAN, "elderly|65\\+"), 1L, 0L),
+    DEMO_FAMILY = if_else(str_detect(DEMO_CLEAN, "famil"), 1L, 0L),
+    DEMO_CHILDREN = if_else(str_detect(DEMO_CLEAN, "children"), 1L, 0L),
+    DEMO_YOUTH = if_else(str_detect(DEMO_CLEAN, "youth|young adults? \\(15-25\\)"), 1L, 0L),
+    DEMO_DISABLED = if_else(str_detect(DEMO_CLEAN, "disabled|cognitively delayed|physically disabled"), 1L, 0L),
+    DEMO_MENTAL_HEALTH = if_else(str_detect(DEMO_CLEAN, "mental health"), 1L, 0L),
+    DEMO_IN_RECOVERY = if_else(str_detect(DEMO_CLEAN, "recovery"), 1L, 0L),
+    DEMO_FORMERLY_INCARCERATED = if_else(str_detect(DEMO_CLEAN, "formerly incarcerated"), 1L, 0L),
+    DEMO_UNDOCUMENTED = if_else(str_detect(DEMO_CLEAN, "undocumented"), 1L, 0L)
+  )
+
+
+
+# Step 1: Select only numeric DEMO_ columns
+demo_numeric <- data_all %>%
+  select(starts_with("DEMO_")) %>%
+  select(where(is.numeric))  # only keep numeric DEMO_ columns
+
+# Step 2: Add row sum back to original data
+data_all$DEMO_TOTAL <- rowSums(as.matrix(demo_numeric), na.rm = TRUE)
+
+# str(demo_numeric)  
+
+table(data_all$DEMO_TOTAL, useNA = "ifany")
+
+```
+
+
+*4.8 Primary services*
+
+```{r}
+
+unique(trimws(data_all$PRIMARY_SERVICES))
+
+
+```
+
+```{r}
+
+# Step 1: Create cleaned version
+data_all <- data_all %>%
+  mutate(PRIMARY_SERVICE_CLEAN = str_to_lower(trimws(PRIMARY_SERVICES)))
+
+# Step 2: Create service category
+data_all <- data_all %>%
+  mutate(
+    SERVICE_CATEGORY = case_when(
+      is.na(PRIMARY_SERVICE_CLEAN) ~ NA_character_,
+      str_detect(PRIMARY_SERVICE_CLEAN, "advocacy|financial literacy|jobs|case management") ~ "Advocacy & Support",
+      str_detect(PRIMARY_SERVICE_CLEAN, "food distribution|meal distribution") ~ "Food Services",
+      str_detect(PRIMARY_SERVICE_CLEAN, "housing|shelter|permanent housing|transitional housing|drop in center|crisis team|on street outreach") ~ "Housing Services",
+      str_detect(PRIMARY_SERVICE_CLEAN, "mental health|recovery|treatment|clinic") ~ "Mental Health & Recovery",
+      str_detect(PRIMARY_SERVICE_CLEAN, "church") ~ "Spiritual",
+      TRUE ~ "Other"
+    )
+  )
+
+table(data_all$SERVICE_CATEGORY, useNA = "ifany")
+table(data_all$ORG_TYPE_CAT_SERVICE, useNA = "ifany")
+
+```
+
+
+*4.8 Services Offered*
+
+```{r}
+
+unique(trimws(data_all$SERVICES_OFFERED))
+
+
+```
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    SERVICES_CLEAN = str_to_lower(trimws(SERVICES_OFFERED)),
+
+    SERVICE_FOOD = if_else(str_detect(SERVICES_CLEAN, "food distribution|meals|gardening|cal fresh"), 1L, 0L),
+    SERVICE_HOUSING = if_else(str_detect(SERVICES_CLEAN, "housing|interim housing|shelter|relocation|navigation"), 1L, 0L),
+    SERVICE_HEALTH = if_else(str_detect(SERVICES_CLEAN, "medical care|healthcare clinic|dmh|therapy|hiv testing|wellness|substance abuse|harm reduction"), 1L, 0L),
+    SERVICE_SUPPORT = if_else(str_detect(SERVICES_CLEAN, "advocacy|case management|legal aid|referral|document retrieval|drop in|resource|cal fresh enrollment"), 1L, 0L),
+    SERVICE_EDUCATION = if_else(str_detect(SERVICES_CLEAN, "education|academic|resume|internships|work program|occupational|computer access|employment support"), 1L, 0L),
+    SERVICE_FINANCIAL = if_else(str_detect(SERVICES_CLEAN, "financial|budgeting"), 1L, 0L),
+    SERVICE_CREATIVE_SPIRITUAL = if_else(str_detect(SERVICES_CLEAN, "art|religious|church"), 1L, 0L),
+    SERVICE_UTILITIES = if_else(str_detect(SERVICES_CLEAN, "laundry|mail services|haircuts|showers"), 1L, 0L)
+  )
+
+```
+
+
+
+```{r}
+
+# Select only numeric service flag columns to avoid issues
+service_flags <- data_all %>%
+  select(starts_with("SERVICE_")) %>%
+  select(where(is.numeric))
+
+# Add row sum back to original dataset
+data_all$SERVICE_TOTAL <- rowSums(service_flags, na.rm = TRUE)
+
+table(data_all$SERVICE_TOTAL)
+
+```
+
+*4.9 Referrals*
+
+Kept same
+
+```{r}
+
+unique(trimws(data_all$REFERRALS_ACCEPTED))
+table(data_all$REFERRALS_ACCEPTED)
+
+```
+
+*5.0 Typical Ind Seeking Service*
+
+```{r}
+
+unique(trimws(data_all$TYPICAL_INDIVIDUAL_SEEKING_SERVICE))
+
+data_all <- data_all %>%
+  mutate(Q_TYPICAL_INDIVIDUAL_SEEKING_SERVICE = trimws(TYPICAL_INDIVIDUAL_SEEKING_SERVICE))
+
+
+```
+
+*5.1 Outcome Goals*
+
+```{r}
+
+unique(trimws(data_all$OUTCOME_GOALS))
+
+
+data_all <- data_all %>%
+  mutate(Q_OUTCOME_GOALS = trimws(OUTCOME_GOALS))
+
+
+```
+
+*5.2 Service Locations*
+
+
+```{r}
+
+unique(trimws(data_all$SERVICE_LOCATIONS))
+       
+
+```
+
+```{r}
+
+# Step 1: Create a lookup table for known city names and their ZIP code representations
+city_zip_lookup <- tibble::tribble(
+  ~city_name,          ~zip_code,
+  "ANAHEIM",           "92801",
+  "SANTA ANA",         "92701",
+  "NORTH OC",          "92801",
+  "OC",                "92801"
+)
+
+# Step 2: Clean and standardize the SERVICE_LOCATIONS variable
+data_all <- data_all %>%
+  mutate(SERVICE_LOCATIONS_CLEAN = str_to_upper(str_trim(SERVICE_LOCATIONS)))
+
+# Step 3: Replace city names with ZIP codes using conditional logic
+data_all <- data_all %>%
+  rowwise() %>%
+  mutate(SERVICE_LOCATIONS_FILLED = case_when(
+    str_detect(SERVICE_LOCATIONS_CLEAN, "ANAHEIM") ~ "92801",
+    str_detect(SERVICE_LOCATIONS_CLEAN, "SANTA ANA") ~ "92701",
+    str_detect(SERVICE_LOCATIONS_CLEAN, "NORTH OC") ~ "92801",
+    str_detect(SERVICE_LOCATIONS_CLEAN, "\\bOC\\b") ~ "92801",
+    str_detect(SERVICE_LOCATIONS_CLEAN, "\\b\\d{5}\\b") ~ SERVICE_LOCATIONS_CLEAN,  # ✅ matches any valid ZIP code
+    TRUE ~ NA_character_
+  )) %>%
+  ungroup()
+
+# Sanity check: Are any non-NA values left unchanged?
+data_all %>% filter(!is.na(SERVICE_LOCATIONS_FILLED)) %>% pull(SERVICE_LOCATIONS_FILLED) %>% head()
+
+```
+
+
+```{r}
+# Step 1: Expand ZIP lists into individual rows
+zip_long <- data_all %>%
+  select(ORG_ID, SERVICE_LOCATIONS_FILLED) %>%
+  filter(!is.na(SERVICE_LOCATIONS_FILLED)) %>%
+  separate_rows(SERVICE_LOCATIONS_FILLED, sep = ",\\s*") %>%
+  mutate(ZIP_CODE = str_trim(SERVICE_LOCATIONS_FILLED)) %>%
+  select(-SERVICE_LOCATIONS_FILLED)
+
+# Step 2: Count number of unique ZIPs per ORG_ID
+zip_counts <- zip_long %>%
+  group_by(ORG_ID) %>%
+  dplyr::summarise(N_ZIPCODES_EXPANDED = n_distinct(ZIP_CODE), .groups = "drop")
+
+# ✅ Step 3: Add that to every row of data_all (not just one row per org)
+data_all <- data_all %>%
+  left_join(zip_counts, by = "ORG_ID")
+
+# test3 <- data_all %>%
+#   select(N_ZIPCODES_EXPANDED)
+
+
+```
+
+
+*5.3 Recent Changes*
+
+```{r}
+
+unique(trimws(data_all$RECENT_CHANGES))
+
+data_all <- data_all %>%
+  mutate(Q_RECENT_CHANGES = trimws(RECENT_CHANGES))
+
+```
+
+
+
+```{r}
+
+unique(trimws(data_all$MEETING_RECENT_CHANGES))
+
+data_all <- data_all %>%
+  mutate(Q_MEETING_RECENT_CHANGES_CLEAN = trimws(MEETING_RECENT_CHANGES)) %>%
+  mutate(Q_MEETING_RECENT_CHANGES_CLEAN = na_if(Q_MEETING_RECENT_CHANGES_CLEAN, "Na")) %>%
+  mutate(Q_MEETING_RECENT_CHANGES_CLEAN = na_if(Q_MEETING_RECENT_CHANGES_CLEAN, "NA"))
+
+
+data_all <- data_all %>%
+  mutate(MEETING_RECENT_CHANGES_BIN = if_else(!is.na(Q_MEETING_RECENT_CHANGES_CLEAN), 1L, 0L))
+
+```
+
+
+```{r}
+
+
+table(data_all$MEETING_RECENT_CHANGES_BIN, useNA = "ifany")
+
+data_all <- data_all %>%
+  mutate(MEETING_RECENT_CHANGES_TYPE_OF_CHANGE = case_when(
+    str_detect(Q_MEETING_RECENT_CHANGES_CLEAN, "case manager|staff|drivers|lines") ~ "Staffing/Operations",
+    str_detect(Q_MEETING_RECENT_CHANGES_CLEAN, "grant|funding|requesting") ~ "Funding/Resources",
+    str_detect(Q_MEETING_RECENT_CHANGES_CLEAN, "food") ~ "Food Supply",
+    str_detect(Q_MEETING_RECENT_CHANGES_CLEAN, "Yes") ~ "Unspecified Yes",
+    is.na(Q_MEETING_RECENT_CHANGES_CLEAN) ~ NA_character_,
+    TRUE ~ "Other"
+  ))
+
+
+table(data_all$MEETING_RECENT_CHANGES_TYPE_OF_CHANGE)
+
+```
+
+
+*5.4 Growth Plans*
+
+```{r}
+
+unique(trimws(data_all$X1_YEAR_GROWTH_PLANS))
+
+data_all <- data_all %>%
+  mutate(Q_X1_YEAR_GROWTH_PLANS = trimws(X1_YEAR_GROWTH_PLANS))
+
+unique(trimws(data_all$X5_YEAR_GROWTH_PLANS))
+
+data_all <- data_all %>%
+  mutate(Q_X5_YEAR_GROWTH_PLANS = trimws(X5_YEAR_GROWTH_PLANS))
+
+```
+
+*5.5 Holidays Recognized*
+
+```{r}
+
+unique(trimws(data_all$HOLIDAYS_RECOGNIZED))
+
+data_all <- data_all %>%
+  mutate(
+    HOLIDAYS_RECOGNIZED_CLEAN = str_to_lower(trimws(HOLIDAYS_RECOGNIZED)),
+    
+    HOLIDAYS_COUNT = case_when(
+      is.na(HOLIDAYS_RECOGNIZED_CLEAN) ~ NA_integer_,
+      HOLIDAYS_RECOGNIZED_CLEAN == "none" ~ 0L,
+      TRUE ~ str_count(HOLIDAYS_RECOGNIZED, ",") + 1L
+    )
+  )
+
+table(data_all$HOLIDAYS_COUNT, useNA = "ifany")
+
+
+```
+
+*5.6 Other schedule notes*
+
+```{r}
+
+unique(trimws(data_all$OTHER_SCHEDULE_NOTES))
+
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    OTHER_SCHED_NOTES_CLEAN = trimws(OTHER_SCHEDULE_NOTES),
+    OTHER_SCHED_NOTES_CLEAN = na_if(Q_OTHER_SCHED_NOTES_CLEAN, "NA"),
+    OTHER_SCHED_NOTES_CLEAN = na_if(Q_OTHER_SCHED_NOTES_CLEAN, "Na"),
+    OTHER_SCHED_NOTES_CLEAN = na_if(Q_OTHER_SCHED_NOTES_CLEAN, "None")
+  )
+
+data_all <- data_all %>%
+  mutate(
+    OTHER_SCHED_NOTES_TYPE = case_when(
+      str_detect(OTHER_SCHED_NOTES_CLEAN, "Half day|half days") ~ "Half Days",
+      str_detect(OTHER_SCHED_NOTES_CLEAN, "Limited hours") ~ "Limited Hours",
+      str_detect(OTHER_SCHED_NOTES_CLEAN, "holiday") ~ "Holiday-related",
+      str_detect(OTHER_SCHED_NOTES_CLEAN, "Jewish") ~ "Jewish Holidays",
+      str_detect(OTHER_SCHED_NOTES_CLEAN, "Monday") ~ "Monday Off",
+      str_detect(OTHER_SCHED_NOTES_CLEAN, "Wednesday") ~ "Rotating Day Off",
+      is.na(OTHER_SCHED_NOTES_CLEAN) ~ NA_character_,
+      TRUE ~ "NA"
+    )
+  )
+
+table(data_all$OTHER_SCHED_NOTES_TYPE)
+
+```
+
+*5.7 Preferred food items*
+
+```{r}
+
+unique(trimws(data_all$PREFERRED_FOOD_ITEMS))
+
+table(data_all$PREFERRED_FOOD_ITEMS)
+
+```
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    
+    PREFERRED_FOOD_ITEMS_CLEAN = trimws(PREFERRED_FOOD_ITEMS),
+    PREFERRED_FOOD_ITEMS_CLEAN = na_if(PREFERRED_FOOD_ITEMS_CLEAN, "NA"),
+    PREFERRED_FOOD_ITEMS_CLEAN = na_if(PREFERRED_FOOD_ITEMS_CLEAN, "Na"),
+    PREFERRED_FOOD_ITEMS_CLEAN = na_if(PREFERRED_FOOD_ITEMS_CLEAN, "All")
+  )
+
+```
+
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    FOOD_PRODUCE = if_else(str_detect(PREFERRED_FOOD_ITEMS_CLEAN, regex("fruit|vegetable|produce|berries|tomato|onion|ginger|chiles|carrot|spinach|lettuce|greens", ignore_case = TRUE)), 1L, 0L),
+    FOOD_MEAT = if_else(str_detect(PREFERRED_FOOD_ITEMS_CLEAN, regex("meat|beef|chicken|pork|protein", ignore_case = TRUE)), 1L, 0L),
+    FOOD_BREAD = if_else(str_detect(PREFERRED_FOOD_ITEMS_CLEAN, regex("bread|pastry|donut|roll", ignore_case = TRUE)), 1L, 0L),
+    FOOD_SNACKS = if_else(str_detect(PREFERRED_FOOD_ITEMS_CLEAN, regex("snack|sweets|candy", ignore_case = TRUE)), 1L, 0L),
+    FOOD_READY = if_else(str_detect(PREFERRED_FOOD_ITEMS_CLEAN, regex("prepared|ready made|individually packed|warm meals|crockpot", ignore_case = TRUE)), 1L, 0L),
+    FOOD_DRINK = if_else(str_detect(PREFERRED_FOOD_ITEMS_CLEAN, regex("drink|juice|beverage|water", ignore_case = TRUE)), 1L, 0L),
+    FOOD_SHELF_STABLE = if_else(str_detect(PREFERRED_FOOD_ITEMS_CLEAN, regex("shelf stable|canned", ignore_case = TRUE)), 1L, 0L),
+    FOOD_EXCLUSIONS = if_else(str_detect(PREFERRED_FOOD_ITEMS_CLEAN, regex("no pork|no eggs|no meat|no beets|no canned", ignore_case = TRUE)), 1L, 0L)
+  )
+
+```
+
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    FOOD_PREF_SCORE =   FOOD_PRODUCE +
+                        FOOD_MEAT +
+                        FOOD_BREAD +
+                        FOOD_SNACKS +
+                        FOOD_READY +
+                        FOOD_DRINK +
+                        FOOD_SHELF_STABLE
+  )
+
+
+table(data_all$FOOD_PREF_SCORE, useNA = "ifany")
+
+# test2 <- data_all%>%
+#   select(FOOD_PREF_SCORE, FOOD_PRODUCE, FOOD_MEAT, FOOD_BREAD, FOOD_SNACKS, FOOD_READY, FOOD_DRINK, FOOD_SHELF_STABLE)
+
+```
+
+
+*5.8 Preferred food items*
+
+```{r}
+
+unique(trimws(data_all$MOST_TO_LEAST_DESIRED))
+
+table(data_all$MOST_TO_LEAST_DESIRED)
+
+```
+
+
+
+```{r}
+
+library(tidyverse)
+
+data_all <- data_all %>%
+  mutate(
+    MOST_TO_LEAST_DESIRED_CLEANED = str_to_title(trimws(MOST_TO_LEAST_DESIRED))  # Normalize format
+  ) %>%
+  separate(MOST_TO_LEAST_DESIRED_CLEANED,
+           into = c("FOOD_PREF_1", "FOOD_PREF_2", "FOOD_PREF_3", "FOOD_PREF_4"),
+           sep = ",\\s*", fill = "right", remove = FALSE)
+
+
+```
+
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    PREF_HAS_PRODUCE = if_else(str_detect(MOST_TO_LEAST_DESIRED_CLEANED, "Produce"), 1L, 0L),
+    PREF_HAS_PROTEIN = if_else(str_detect(MOST_TO_LEAST_DESIRED_CLEANED, "Protein"), 1L, 0L),
+    PREF_HAS_MEALS = if_else(str_detect(MOST_TO_LEAST_DESIRED_CLEANED, "Meals"), 1L, 0L),
+    PREF_HAS_SHELF_STABLE = if_else(str_detect(MOST_TO_LEAST_DESIRED_CLEANED, "Shelf Stable"), 1L, 0L)
+  )
+
+```
+
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    FOOD_PREF_RANK_COUNT = rowSums(select(., starts_with("PREF_HAS_")), na.rm = TRUE)
+  )
+
+table(data_all$FOOD_PREF_RANK_COUNT)
+
+
+data_all <- data_all %>%
+  mutate(
+    FOOD_PREF_RANK_LEVEL = case_when(
+      FOOD_PREF_RANK_COUNT == 0 ~ "None",
+      FOOD_PREF_RANK_COUNT == 1 ~ "1 Preference",
+      FOOD_PREF_RANK_COUNT == 2 ~ "2 Preferences",
+      FOOD_PREF_RANK_COUNT == 3 ~ "3 Preferences",
+      FOOD_PREF_RANK_COUNT >= 4 ~ "4 Preferences (All)",
+      TRUE ~ NA_character_
+    ) %>% factor(
+      levels = c("None", "1 Preference", "2 Preferences", "3 Preferences", "4 Preferences (All)")
+    )
+  )
+
+# 
+# test3 <- data_all %>%
+#   select(ORG_ID, MOST_TO_LEAST_DESIRED_CLEANED, FOOD_PREF_RANK_COUNT, PREF_HAS_PRODUCE, PREF_HAS_PROTEIN, PREF_HAS_MEALS, PREF_HAS_SHELF_STABLE)
+
+
+
+
+
+```
+
+
+*5.9 Reason for partering: how you hear about us*
+
+```{r}
+
+unique(trimws(data_all$REASON_FOR_ORIGINALLY_PARTNERING))
+
+table(data_all$MOST_TO_LEAST_DESIRED)
+
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    REASON_FOR_ORIGINALLY_PARTNERING_CLEAN = trimws(REASON_FOR_ORIGINALLY_PARTNERING),
+    REASON_FOR_ORIGINALLY_PARTNERING_CLEAN = na_if(Q_REASON_FOR_ORIGINALLY_PARTNERING_CLEAN, "NA"),
+    REASON_FOR_ORIGINALLY_PARTNERING_CLEAN = na_if(Q_REASON_FOR_ORIGINALLY_PARTNERING_CLEAN, "Na"),
+    
+    REASON_FOR_ORIGINALLY_PARTNERING_TYPE = case_when(
+      str_detect(REASON_FOR_ORIGINALLY_PARTNERING_CLEAN, regex("jonnie|asher|bonnie|amanda|carrie|sherri|susie|alex|denise|frank|nishat|nicole|clark|individual", ignore_case = TRUE)) ~ "Direct Referral",
+      str_detect(REASON_FOR_ORIGINALLY_PARTNERING_CLEAN, regex("volunteer|cook|comedian|prior member|someone approached|word of mouth|referred|connected|contact|reached out|shared", ignore_case = TRUE)) ~ "Word of Mouth",
+      str_detect(REASON_FOR_ORIGINALLY_PARTNERING_CLEAN, regex("grant|nutrition|food bank|program|distro|location|budget", ignore_case = TRUE)) ~ "Program",
+      is.na(REASON_FOR_ORIGINALLY_PARTNERING_CLEAN) ~ NA_character_,
+      TRUE ~ "Other"
+    ) %>% factor(levels = c("Direct Referral", "Word of Mouth", "Program", "Other"))
+  )
+
+
+table(data_all$REASON_FOR_ORIGINALLY_PARTNERING_TYPE)
+
+
+```
+
+
+
+
+
+
+```{r}
+
+unique(trimws(data_all$REASON_FOR_CONTINUED_PARTNERSHIP))
+
+table(data_all$MOST_TO_LEAST_DESIRED)
+
+```
+
+*6.0 Reason for continued partnership*
+
+
+```{r}
+
+unique(trimws(data_all$REASON_FOR_CONTINUED_PARTNERSHIP))
+
+data_all <- data_all %>%
+  mutate(Q_REASON_FOR_CONTINUED_PARTNERSHIP = trimws(REASON_FOR_CONTINUED_PARTNERSHIP))
+
+
+
+```
+
+*6.1 Food Sources*
+
+```{r}
+
+unique(trimws(data_all$FOOD_SOURCES))
+
+
+```
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    FOOD_SOURCES_CLEAN = trimws(str_to_lower(FOOD_SOURCES)),
+    FOOD_SOURCES_CLEAN = na_if(FOOD_SOURCES_CLEAN, "none"),
+    FOOD_SOURCES_CLEAN = na_if(FOOD_SOURCES_CLEAN, "na"),
+    FOOD_SOURCES_CLEAN = na_if(FOOD_SOURCES_CLEAN, "")
+  )
+
+```
+
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    FOOD_FROM_HOFOCO = if_else(str_detect(FOOD_SOURCES_CLEAN, "hofoco|mostly us|besides us|otherwise it"), 1L, 0L),
+    FOOD_FROM_PURCHASE = if_else(str_detect(FOOD_SOURCES_CLEAN, "budget|purchase|paid|buy|bought"), 1L, 0L),
+    FOOD_FROM_DONATION = if_else(str_detect(FOOD_SOURCES_CLEAN, "donation|donated|volunteer|community|church|parishoner|lauds|bub's|jl cooks|for goodness cakes"), 1L, 0L),
+    FOOD_FROM_RESTAURANTS = if_else(str_detect(FOOD_SOURCES_CLEAN, "chipotle|mcdonalds|vons|taco|pizza hut|restaurant|vendor|cinnabon|bakery"), 1L, 0L),
+    FOOD_FROM_FOOD_BANK = if_else(str_detect(FOOD_SOURCES_CLEAN, "food bank|la regional|mend|valley food bank"), 1L, 0L),
+    FOOD_FROM_ORGS = if_else(str_detect(FOOD_SOURCES_CLEAN, "food forward|foodcycle|food cycle|helping hands|everytable|everyday action|seeds of hope|hodg|dream center|peoples coalition"), 1L, 0L),
+    FOOD_FROM_GROCERY = if_else(str_detect(FOOD_SOURCES_CLEAN, "grocery|farmers market|gleaning|imperfect food|trader joe|tj's|company|smart & final|costco|whole foods|lassens"), 1L, 0L)
+  )
+
+```
+
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    FOOD_SOURCE_TYPE_COUNT = rowSums(select(., starts_with("FOOD_FROM_")), na.rm = TRUE)
+  )
+
+```
+
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    FOOD_SOURCE_LEVEL = case_when(
+      FOOD_SOURCE_TYPE_COUNT == 0 ~ "Other",
+      FOOD_SOURCE_TYPE_COUNT == 1 ~ "1 Source",
+      FOOD_SOURCE_TYPE_COUNT == 2 ~ "2 Sources",
+      FOOD_SOURCE_TYPE_COUNT >= 3 ~ "3+ Sources",
+      TRUE ~ NA_character_
+    ) %>% factor(levels = c("Other", "1 Source", "2 Sources", "3+ Sources"))
+  )
+
+table(data_all$FOOD_SOURCE_LEVEL)
+
+test4 <- data_all%>%
+  select(FOOD_SOURCE_LEVEL, FOOD_FROM_HOFOCO, FOOD_FROM_PURCHASE, FOOD_FROM_DONATION, FOOD_FROM_RESTAURANTS, FOOD_FROM_FOOD_BANK, FOOD_FROM_ORGS, FOOD_FROM_GROCERY)
+
+```
+
+
+*6.2 Food Intake Barriers*
+
+```{r}
+
+unique(trimws(data_all$FOOD_INTAKE_BARRIERS))
+
+
+```
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    # Clean raw text
+    FOOD_INTAKE_BARRIERS_CLEAN = trimws(FOOD_INTAKE_BARRIERS),
+
+    # Convert placeholder text NA values to real NAs (but NOT "None")
+    FOOD_INTAKE_BARRIERS_CLEAN = if_else(
+      str_to_lower(FOOD_INTAKE_BARRIERS_CLEAN) %in% c("na", "n/a", "", " na"),
+      NA_character_,
+      FOOD_INTAKE_BARRIERS_CLEAN
+    ),
+
+    # Indicators for each umbrella category
+    BARRIER_NO_BARRIERS = if_else(str_detect(str_to_lower(FOOD_INTAKE_BARRIERS_CLEAN), 
+                                             "none|none as of right now|none so far"), 1L, 0L),
+    BARRIER_ELIGIBILITY = if_else(str_detect(str_to_lower(FOOD_INTAKE_BARRIERS_CLEAN), 
+                                             "paperwork|requirement|eligibility"), 1L, 0L),
+    BARRIER_CAPACITY = if_else(str_detect(str_to_lower(FOOD_INTAKE_BARRIERS_CLEAN), 
+                                          "storage|capacity|pallet|time|people|staff|intake"), 1L, 0L),
+    BARRIER_ACCESS = if_else(str_detect(str_to_lower(FOOD_INTAKE_BARRIERS_CLEAN), 
+                                        "truck|vehicle|driver|distance|long beach|transport"), 1L, 0L),
+    BARRIER_SYSTEMIC = if_else(str_detect(str_to_lower(FOOD_INTAKE_BARRIERS_CLEAN), 
+                                          "poaching|attitude|orgs say no|system|standard|cost|reject|volunteer"), 1L, 0L))
+data_all <- data_all %>%
+  mutate(
+
+    BARRIER_OTHER = if_else(
+      !is.na(FOOD_INTAKE_BARRIERS_CLEAN) &
+      BARRIER_NO_BARRIERS == 0 &
+      BARRIER_ELIGIBILITY == 0 &
+      BARRIER_CAPACITY == 0 &
+      BARRIER_ACCESS == 0 &
+      BARRIER_SYSTEMIC == 0,
+      1L, 0L
+    ))
+
+data_all <- data_all %>%
+  mutate(
+    # Final grouped variable
+    FOOD_INTAKE_BARRIERS_GROUP = case_when(
+      is.na(FOOD_INTAKE_BARRIERS_CLEAN) ~ NA_character_,
+      BARRIER_NO_BARRIERS == 1 ~ "No Barriers",
+      BARRIER_ELIGIBILITY == 1 ~ "Eligibility",
+      BARRIER_CAPACITY == 1 ~ "Capacity",
+      BARRIER_ACCESS == 1 ~ "Access",
+      BARRIER_SYSTEMIC == 1 ~ "Systemic / Relational",
+      BARRIER_OTHER == 1 ~ "Other",
+      TRUE ~ NA_character_
+    ) %>% factor(
+      levels = c("No Barriers", "Eligibility", "Capacity", "Access", "Systemic / Relational", "Other")
+    )
+  )
+
+table(data_all$FOOD_INTAKE_BARRIERS_GROUP, useNA = "ifany")
+
+```
+
+
+
+*6.3 Hypotheticals*
+
+```{r}
+
+unique(trimws(data_all$HYPOTHETICAL_FOOD_RESPONSE_WITHOUT_HOFOCO))
+
+data_all <- data_all %>%
+  mutate(Q_HYPOTHETICAL_FOOD_RESPONSE_WITHOUT_HOFOCO = trimws(HYPOTHETICAL_FOOD_RESPONSE_WITHOUT_HOFOCO))
+
+
+```
+
+
+```{r}
+
+unique(trimws(data_all$HYPOTHETICAL_HOFOCO_FOOD_DELIVERY_OPTION))
+
+data_all <- data_all %>%
+  mutate(Q_HYPOTHETICAL_HOFOCO_FOOD_DELIVERY_OPTION = trimws(HYPOTHETICAL_HOFOCO_FOOD_DELIVERY_OPTION))
+
+
+```
+
+*6.4 Food Quality Recently*
+
+
+```{r}
+
+unique(trimws(data_all$RECENT_FOOD_QUALITY))
+
+
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    RECENT_FOOD_QUALITY_CLEAN = trimws(RECENT_FOOD_QUALITY),
+    RECENT_FOOD_QUALITY_CLEAN = if_else(
+      str_to_lower(RECENT_FOOD_QUALITY_CLEAN) %in% c("na", "n/a", "", "na ", " na"),
+      NA_character_,
+      RECENT_FOOD_QUALITY_CLEAN
+    ),
+
+    FOOD_QUALITY_LIKERT = case_when(
+      # Needs Improvement
+      str_detect(str_to_lower(RECENT_FOOD_QUALITY_CLEAN), "moldy|tossed|not edible|bad.*crates|spoiled|bruised|out of the range|last few pick ups were not great|expired|bottom.*bad") ~ "Room for Improvement",
+
+      # Adequate
+      str_detect(str_to_lower(RECENT_FOOD_QUALITY_CLEAN), "some.*bad|some.*concern|short shelf life|occasionally.*bad|passed their use|fair|volunteer discrepancies|mostly have been consistent") ~ "Adequate",
+
+      # Good
+      str_detect(str_to_lower(RECENT_FOOD_QUALITY_CLEAN), "good food|good overall|mostly good|no.*problem|no.*issue|no.*complaint|all good|pretty good|consistent") ~ "Good",
+
+      # Great
+      str_detect(str_to_lower(RECENT_FOOD_QUALITY_CLEAN), "minimal waste|really great|95% of food is viable|excellent|fresh|variety") ~ "Great",
+
+      is.na(RECENT_FOOD_QUALITY_CLEAN) ~ NA_character_,
+      TRUE ~ "Adequate"  # Conservative default
+    ) %>% factor(
+      levels = c("Room for Improvement", "Adequate", "Good", "Great"),
+      ordered = TRUE
+    )
+  )
+
+table(data_all$FOOD_QUALITY_LIKERT, useNA = "ifany")
+
+```
+
+
+*6.4 Food Quality*
+
+
+```{r}
+
+unique(trimws(data_all$FOOD_QUALITY))
+table(data_all$FOOD_QUALITY_NUM)
+
+data_all <- data_all %>%
+  mutate(FOOD_QUALITY_NUM = as.numeric(FOOD_QUALITY))
+
+
+```
+
+
+
+*6.5 Impact of food received*
+
+
+```{r}
+
+unique(trimws(data_all$IMPACT_OF_FOOD_RECEIVED))
+
+data_all <- data_all %>%
+  mutate(Q_IMPACT_OF_FOOD_RECEIVED = trimws(IMPACT_OF_FOOD_RECEIVED))
+
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    IMPACT_OF_FOOD_RECEIVED_CLEAN = trimws(IMPACT_OF_FOOD_RECEIVED),  # adjust variable name if needed
+    IMPACT_OF_FOOD_RECEIVED_CLEAN = na_if(IMPACT_OF_FOOD_RECEIVED_CLEAN, "NA"),
+
+    IMPACT_OF_FOOD_RECEIVED_CATEGORY = case_when(
+      is.na(IMPACT_OF_FOOD_RECEIVED_CLEAN) ~ NA_character_,
+      str_detect(str_to_lower(IMPACT_OF_FOOD_RECEIVED_CLEAN), "budget|cost|pay|finance|afford") ~ "Budget Support",
+      str_detect(str_to_lower(IMPACT_OF_FOOD_RECEIVED_CLEAN), "entire service|only service|main.*service|primary service") ~ "Core Service",
+      str_detect(str_to_lower(IMPACT_OF_FOOD_RECEIVED_CLEAN), "rapport|connect|outreach|social|relationship|community") ~ "Engagement Tool",
+      str_detect(str_to_lower(IMPACT_OF_FOOD_RECEIVED_CLEAN), "nutrition|vegetables|meals|variety|healthy") ~ "Health/Nutrition",
+       str_detect(str_to_lower(IMPACT_OF_FOOD_RECEIVED_CLEAN), "operate|consistency|portion|report|delivery|run|support|distro") ~ "Operational Support",
+      TRUE ~ "Other"
+    ) %>%
+    factor(levels = c("Budget Support", "Core Service", "Engagement Tool", "Health/Nutrition", "Operational Support", "Other"))
+  )
+
+# table(data_all$IMPACT_OF_FOOD_RECEIVED_CATEGORY)
+
+```
+
+
+*6.6 Impact story*
+
+
+```{r}
+
+unique(trimws(data_all$IMPACT_STORY_1))
+
+data_all <- data_all %>%
+  mutate(Q_IMPACT_STORY_1 = trimws(IMPACT_STORY_1))
+
+```
+
+```{r}
+
+unique(trimws(data_all$IMPACT_STORY_2))
+
+data_all <- data_all %>%
+  mutate(Q_IMPACT_STORY_2 = trimws(IMPACT_STORY_2))
+
+```
+
+```{r}
+
+unique(trimws(data_all$IMPACT_STORY_3))
+
+data_all <- data_all %>%
+  mutate(Q_IMPACT_STORY_3 = trimws(IMPACT_STORY_3))
+
+```
+
+
+*6.7 Food Distro*
+
+```{r}
+
+unique(trimws(data_all$FOOD_DISTRO_PROCESS))
+
+data_all <- data_all %>%
+  mutate(Q_FOOD_DISTRO_PROCESS = trimws(FOOD_DISTRO_PROCESS))
+
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    FOOD_DISTRIBUTION_CLEAN = trimws(FOOD_DISTRO_PROCESS),  # Replace with your actual var name
+
+    FOOD_DISTRIBUTION_TYPE = case_when(
+      is.na(FOOD_DISTRIBUTION_CLEAN) ~ NA_character_,
+      str_detect(str_to_lower(FOOD_DISTRIBUTION_CLEAN), "meal|cook|hot|microwave|breakfast|lunch|dinner") ~ "Meal Service",
+      str_detect(str_to_lower(FOOD_DISTRIBUTION_CLEAN), "bag|box|deliver|prepackaged|portion") ~ "Bagged/Boxed Food",
+      str_detect(str_to_lower(FOOD_DISTRIBUTION_CLEAN), "pantry|market|bring your own bag|select") ~ "Pantry/Market Style",
+      str_detect(str_to_lower(FOOD_DISTRIBUTION_CLEAN), "outreach|truck|mobile|locations|on street|satellite") ~ "Mobile/Outreach",
+      str_detect(str_to_lower(FOOD_DISTRIBUTION_CLEAN), "fridge|community fridge|shared pantry") ~ "Community Fridge",
+      TRUE ~ "Other"
+    ) %>%
+    factor(levels = c("Meal Service", "Bagged/Boxed Food", "Pantry/Market Style", "Mobile/Outreach", "Community Fridge", "Other"))
+  )
+
+# table(data_all$FOOD_DISTRIBUTION_TYPE)
+
+```
+
+
+```{r}
+
+unique(trimws(data_all$FOOD_DISTRO_CHALLENGES))
+
+data_all <- data_all %>%
+  mutate(Q_FOOD_DISTRO_CHALLENGES = trimws(FOOD_DISTRO_CHALLENGES))
+
+```
+
+```{r}
+data_all <- data_all %>%
+  mutate(
+    FOOD_DISTRO_CHALLENGES_CLEAN = trimws(FOOD_DISTRO_CHALLENGES),
+    
+    FOOD_DISTRO_CHALLENGES_CLEAN = if_else(
+      str_to_lower(FOOD_DISTRO_CHALLENGES_CLEAN) %in% c("na", "n/a", "", "na ", " na"),
+      NA_character_,
+      FOOD_DISTRO_CHALLENGES_CLEAN
+    ),
+    
+    FOOD_DISTRO_CHALLENGE_TYPE = case_when(
+      is.na(FOOD_DISTRO_CHALLENGES_CLEAN) ~ NA_character_,
+      str_detect(str_to_lower(FOOD_DISTRO_CHALLENGES_CLEAN), "none|smooth|90% successful") ~ "None Reported",
+      str_detect(str_to_lower(FOOD_DISTRO_CHALLENGES_CLEAN), "car|driver|truck|van|delivery") ~ "Logistics & Transportation",
+      str_detect(str_to_lower(FOOD_DISTRO_CHALLENGES_CLEAN), "storage|cold|fridge|freezer|space") ~ "Cold/Storage Constraints",
+      str_detect(str_to_lower(FOOD_DISTRO_CHALLENGES_CLEAN), "staff|volunteer|coordinator") ~ "Staffing & Volunteer Needs",
+      str_detect(str_to_lower(FOOD_DISTRO_CHALLENGES_CLEAN), "budget|money|grant|suppl|oven|kitchen") ~ "Funding & Supplies",
+      str_detect(str_to_lower(FOOD_DISTRO_CHALLENGES_CLEAN), "trust|fight|fussy|scare|picky|take too much|residents") ~ "Community & Trust Issues",
+      TRUE ~ "Other"
+    ) %>%
+    factor(levels = c("None Reported", "Logistics & Transportation", "Cold/Storage Constraints", 
+                      "Staffing & Volunteer Needs", "Funding & Supplies", "Community & Trust Issues", "Other"))
+  )
+
+# table(data_all$FOOD_DISTRO_CHALLENGE_TYPE)
+
+
+```
+
+
+
+*6.8 Feedback*
+
+```{r}
+
+unique(trimws(data_all$FEEDBACK))
+
+data_all <- data_all %>%
+  mutate(Q_FEEDBACK = trimws(FEEDBACK))
+
+```
+
+
+```{r}
+
+data_all <- data_all %>%
+  mutate(
+    FEEDBACK_CLEAN = trimws(FEEDBACK),
+    
+    FEEDBACK_CLEAN = if_else(
+      str_to_lower(FEEDBACK_CLEAN) %in% c("na", "n/a", "", " na", "none"),
+      NA_character_,
+      FEEDBACK_CLEAN
+    ),
+    
+    FEEDBACK_GROUPED = case_when(
+      is.na(FEEDBACK_CLEAN) ~ "None / Not Reported",
+      str_detect(str_to_lower(FEEDBACK_CLEAN), "thank|grateful|fantastic|love|appreciate|great|delight|happy|helpful|gratitude|motivating|high quality") ~ "Gratitude & Praise",
+      str_detect(str_to_lower(FEEDBACK_CLEAN), "relationship|reestablish|welcome|attend|open house|partnership|refer|face to names|share guests|expand") ~ "Relationship Building",
+      str_detect(str_to_lower(FEEDBACK_CLEAN), "qc|suggest|feedback|wish|refer more|better") ~ "Suggestions & Requests",
+      str_detect(str_to_lower(FEEDBACK_CLEAN), "pick up|moving|scheduling|leave") ~ "Logistics/Planning",
+      TRUE ~ "Other"
+    ) %>%
+    factor(levels = c("Gratitude & Praise", "Relationship Building", "Suggestions & Requests", "Logistics/Planning", "Other", "None / Not Reported"))
+  )
+
+table(data_all$FEEDBACK_GROUPED)
+
+```
+
+
+```{r}
+
+unique(trimws(data_all$NOTES))
+
+data_all <- data_all %>%
+  mutate(Q_NOTES = trimws(NOTES))
+
+```
+
+
+```{r}
+
+unique(trimws(data_all$FUTURE_CHECK_IN_PREFERENCE))
+
+
+data_all <- data_all %>%
+  mutate(FUTURE_CHECK_IN_PREFERENCE_CLEAN = trimws(FUTURE_CHECK_IN_PREFERENCE))
+
+```
+
+
+
+
+
+```{r}
+
+data_all <- data_all %>% select(
+  ORG_ID,
+  DATE, DAY, MONTH, YEAR,
+  ORGANIZATION_TYPE_CLEAN, ORG_TYPE_CAT_SERVICE,
+  LOCATION, LA_TIMES_REGION, SPA_CATEGORY,
+  HOURS_OF_OPERATION_CLEAN, DAYS_PER_WEEK, TIME_OF_DAY_CATEGORY,
+  METRICS, VOLUNTEER_RUN_ORGANIZATION,
+  UNIQUE_INDIVIDUALS_SERVED_WEEKLY, UNIQUE_INDIVIDUALS_SERVED_WEEKLY_CAT, WEEKLY_GAP, WEEKLY_GAP_LEVEL, AVG_SERVICES_PER_PERSON_WEEKLY,
+  TOTAL_SERVED_WEEKLY, TOTAL_SERVED_WEEKLY_CAT,
+  UNIQUE_INDIVIDUALS_SERVED_MONTHLY, UNIQUE_INDIVIDUALS_SERVED_MONTHLY_CAT, MONTHLY_GAP, AVG_SERVICES_PER_PERSON_MONTHLY,
+  TOTAL_SERVED_MONTHLY, TOTAL_SERVED_MONTHLY_CAT,
+  AGE_RANGE_CLEAN, AGE_MULTIPLE_GROUPS, AGE_YOUTH, AGE_YOUNG_ADULTS, AGE_ADULTS, AGE_OLDER_ADULTS,
+  RACIAL_CLEAN, DIVERSITY_SCORE, INCLUDES_BLACK, INCLUDES_LATINO, INCLUDES_WHITE, INCLUDES_ASIAN, INCLUDES_OTHER,
+  PCT_LOW_INCOME_SERVED, AGE_UNDER_18_PCT, AGE_18_25_PCT, AGE_26_40_PCT, AGE_41_65_PCT, AGE_65_PLUS_PCT,
+  POP_LANG_CLEAN, LANGUAGE_DIVERSITY_SCORE, LANG_SPANISH, LANG_ENGLISH, LANG_RUSSIAN, LANG_KOREAN, LANG_CHINESE,
+  LANG_ARABIC, LANG_TAGALOG, LANG_ARMENIAN, LANG_VIETNAMESE, LANG_FRENCH, LANG_OTHER,
+  PCT_GENDER_MALE, GENDER_PREDOMINANTLY_MALE, PCT_GENDER_FEMALE, GENDER_PREDOMINANTLY_FEMALE,
+  PCT_GENDER_NON_BINARY, GENDER_DIVERSE, PCT_GENDER_TRANSGENDER, GENDER_BALANCED, GENDER_CATEGORY,
+  PCT_VETERANS_SERVED, PCT_PREV_INCARCERATED, PCT_LGBTQ, PCT_UNHOUSED, PCT_UNHOUSED_CATEGORY,
+  Q_PROGRAM_ENTRY_FOOD_RESTRICTIONS,
+  DEMO_CLEAN, DEMO_UNHOUSED, DEMO_IMMIGRANT, DEMO_LGBTQ, DEMO_ADULT, DEMO_ELDERLY,
+  DEMO_FAMILY, DEMO_CHILDREN, DEMO_YOUTH, DEMO_DISABLED, DEMO_MENTAL_HEALTH, DEMO_IN_RECOVERY,
+  DEMO_FORMERLY_INCARCERATED, DEMO_UNDOCUMENTED, DEMO_TOTAL,
+  PRIMARY_SERVICE_CLEAN, SERVICE_CATEGORY, SERVICES_CLEAN,
+  SERVICE_FOOD, SERVICE_HOUSING, SERVICE_HEALTH, SERVICE_SUPPORT, SERVICE_EDUCATION,
+  SERVICE_FINANCIAL, SERVICE_CREATIVE_SPIRITUAL, SERVICE_UTILITIES, SERVICE_TOTAL,
+  REFERRALS_ACCEPTED, Q_TYPICAL_INDIVIDUAL_SEEKING_SERVICE, Q_OUTCOME_GOALS,
+  SERVICE_LOCATIONS_CLEAN, SERVICE_LOCATIONS_FILLED, N_ZIPCODES_EXPANDED,
+  Q_RECENT_CHANGES, Q_MEETING_RECENT_CHANGES_CLEAN, MEETING_RECENT_CHANGES_BIN, MEETING_RECENT_CHANGES_TYPE_OF_CHANGE,
+  Q_X1_YEAR_GROWTH_PLANS, Q_X5_YEAR_GROWTH_PLANS,
+  HOLIDAYS_RECOGNIZED_CLEAN, HOLIDAYS_COUNT,
+  OTHER_SCHED_NOTES_CLEAN, OTHER_SCHED_NOTES_TYPE,
+  PREFERRED_FOOD_ITEMS_CLEAN, FOOD_PRODUCE, FOOD_MEAT, FOOD_BREAD, FOOD_SNACKS,
+  FOOD_READY, FOOD_DRINK, FOOD_SHELF_STABLE, FOOD_EXCLUSIONS, FOOD_PREF_SCORE,
+  MOST_TO_LEAST_DESIRED_CLEANED, FOOD_PREF_1, FOOD_PREF_2, FOOD_PREF_3, FOOD_PREF_4,
+  PREF_HAS_PRODUCE, PREF_HAS_PROTEIN, PREF_HAS_MEALS, PREF_HAS_SHELF_STABLE,
+  FOOD_PREF_RANK_COUNT, FOOD_PREF_RANK_LEVEL,
+  REASON_FOR_ORIGINALLY_PARTNERING_CLEAN, REASON_FOR_ORIGINALLY_PARTNERING_TYPE,
+  Q_REASON_FOR_CONTINUED_PARTNERSHIP,
+  FOOD_SOURCES_CLEAN, FOOD_FROM_HOFOCO, FOOD_FROM_PURCHASE, FOOD_FROM_DONATION,
+  FOOD_FROM_RESTAURANTS, FOOD_FROM_FOOD_BANK, FOOD_FROM_ORGS, FOOD_FROM_GROCERY,
+  FOOD_SOURCE_TYPE_COUNT, FOOD_SOURCE_LEVEL,
+  FOOD_INTAKE_BARRIERS_CLEAN, BARRIER_NO_BARRIERS, BARRIER_ELIGIBILITY, BARRIER_CAPACITY,
+  BARRIER_ACCESS, BARRIER_SYSTEMIC, BARRIER_OTHER, FOOD_INTAKE_BARRIERS_GROUP,
+  Q_HYPOTHETICAL_FOOD_RESPONSE_WITHOUT_HOFOCO, Q_HYPOTHETICAL_HOFOCO_FOOD_DELIVERY_OPTION,
+  RECENT_FOOD_QUALITY_CLEAN, FOOD_QUALITY_LIKERT, FOOD_QUALITY_NUM,
+  Q_IMPACT_OF_FOOD_RECEIVED, IMPACT_OF_FOOD_RECEIVED_CLEAN, IMPACT_OF_FOOD_RECEIVED_CATEGORY,
+  Q_IMPACT_STORY_1, Q_IMPACT_STORY_2, Q_IMPACT_STORY_3,
+  Q_FOOD_DISTRO_PROCESS, FOOD_DISTRIBUTION_CLEAN, FOOD_DISTRIBUTION_TYPE,
+  Q_FOOD_DISTRO_CHALLENGES, FOOD_DISTRO_CHALLENGES_CLEAN, FOOD_DISTRO_CHALLENGE_TYPE,
+  Q_FEEDBACK, FEEDBACK_CLEAN, FEEDBACK_GROUPED, Q_NOTES, FUTURE_CHECK_IN_PREFERENCE_CLEAN
+)
+
+```
+
+
+
+```{r}
+
+write.csv(data_all, here::here("data", "data_all.csv"))
+
+```
+
+```{r}
+
+write.csv(zip_long, here::here("data", "zip_long.csv"))
+
+```
