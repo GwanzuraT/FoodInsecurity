@@ -1,0 +1,7 @@
+---
+title: "1_Descriptive_Statistics"
+author: "Jorge Gonzalez Mejia"
+date: "2025-07-09"
+output: html_document
+---
+
