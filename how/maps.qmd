@@ -7,6 +7,8 @@ editor: visual
 
 Goal: quickly visualize data in map form so HoFoCo can more quickly assess which geographies might be worth expanding into and/or which areas might have greatest need.
 
+interesting cols: total served monthly, unique individuals served monthly; total recipient orgs, org type/primary services, services per person per month
+
 ```{r}
 library(readr)
 library(tidyverse)
@@ -51,34 +53,39 @@ options(tigris_use_cache = TRUE)
 zcta <- zctas(cb = TRUE, year = 2020)
 
 
+# 1. Compute count of each ZIP in `long`
+zip_counts <- long %>%
+  count(zip, name = "hfc_count") %>%
+  mutate(zip = as.character(zip))
 
-zcta_la <- zcta %>%
-  rename(zipcode = ZCTA5CE20) %>%
-  filter(zipcode %in% la_zip_sf$zipcode) %>%
-  left_join(zipcode_info, by = "zipcode")
 
+# 2. Join counts to HFC_geo (before filtering)
 HFC_geo <- long %>%
   left_join(zipcode_info, by = c("zip" = "zipcode")) %>%
   filter(!is.na(lat) & !is.na(lng)) %>%
-  st_as_sf(coords = c("lng", "lat"), crs = 4326)
+  st_as_sf(coords = c("lng", "lat"), crs = 4326) %>%
+  left_join(zip_counts, by = c("zip"))
 
-#some corrections to make sure HFC and ct align 
-zcta_la <- st_transform(zcta_la, crs = 4326)
-HFC_geo <- st_transform(HFC_geo, crs = 4326)
-valid_zips <- zcta_la$zipcode
+# 3. Filter HFC_geo to valid ZIPs (same as before)
+zcta_la <- zcta %>%
+  rename(zipcode = ZCTA5CE20) %>%
+  filter(zipcode %in% la_zip_sf$zipcode) %>%
+  left_join(zipcode_info, by = "zipcode") %>%
+  st_transform(crs = 4326)
+
 HFC_geo_filtered <- HFC_geo %>%
-     filter(zip %in% valid_zips)
- 
- 
+  filter(zip %in% zcta_la$zipcode) %>%
+  st_transform(crs = 4326)
 
-
+# 4. Plot with dot size proportional to hfc_count
 ggplot() +
   geom_sf(data = zcta_la, aes(fill = housing_ratio), color = "white", size = 0.2) +
   scale_fill_viridis_c(option = "plasma", na.value = "grey80", name = "Housing Ratio") +
-  geom_sf(data = HFC_geo_filtered, color = "black", shape = 21, fill = "white", size = 2, stroke = 0.5) +
+  geom_sf(data = HFC_geo_filtered, aes(size = hfc_count), color = "black", shape = 21, fill = "white", stroke = 0.5) +
+  scale_size_continuous(range = c(1, 6), name = "HFC Recipient Orgs") +   # Adjust dot size range as desired
   labs(
     title = "Housing Occupancy Ratio by ZIP Code (Los Angeles County)",
-    subtitle = "Dots represent HFC recipients",
+    subtitle = "Dot size proportional to number of HFC recipient orgs per ZIP",
     caption = "Data: National Association of Realtors (zipcodeR), tigris, HFC"
   ) +
   theme_minimal() +
@@ -88,10 +95,63 @@ ggplot() +
 
 ```
 
-```{r}
+```{r map of HFC recipients }
 
+library(tigris)
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+
+options(tigris_use_cache = TRUE)
+
+# 1. Standardize ZIP codes
+long <- long %>%
+  mutate(zip = str_pad(as.character(zip), 5, pad = "0"))
+
+# 2. Count occurrences of each ZIP
+zip_counts <- long %>%
+  count(zip, name = "hfc_count")
+
+# 3. Load ZCTA shapefile and filter to ZIPs in `long`
+zcta <- zctas(cb = TRUE, year = 2020)
+
+zcta_long <- zcta %>%
+  rename(zip = ZCTA5CE20) %>%
+  mutate(zip = str_pad(as.character(zip), 5, pad = "0")) %>%
+  filter(zip %in% zip_counts$zip) %>%
+  left_join(zip_counts, by = "zip") %>%
+  st_transform(crs = 4326) %>%
+  mutate(centroid = st_centroid(geometry)) %>%
+  mutate(lat = st_coordinates(centroid)[,2]) %>%
+  filter(lat >= 33.5 & lat <= 34.5)
+
+# 4. Load LA County census tracts
+la_tracts <- tracts(state = "CA", county = "Los Angeles", cb = TRUE, year = 2020) %>%
+  st_transform(crs = 4326) %>%
+  mutate(centroid = st_centroid(geometry)) %>%
+  mutate(lat = st_coordinates(centroid)[,2]) %>%
+  filter(lat >= 33.5 & lat <= 34.5)
+
+# 5. Plot the map
+ggplot() +
+  geom_sf(data = la_tracts, fill = "grey90", color = "white", size = 0.2) +
+  geom_sf(data = zcta_long, aes(fill = hfc_count), color = "white", size = 0.2) +
+  scale_fill_viridis_c(option = "plasma", name = "# of HFC recipients", na.value = "grey80") +
+  labs(
+    title = "Number of HFC Recipients (Zipcode)"
+    #caption = "Data: TIGRIS, HFC ZIPs"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+
+```
+
+```{r}
+library(here)
 # data from: https://www.ers.usda.gov/data-products/food-access-research-atlas/download-the-data
-atlas <- read_csv("how/inputs/ResearchAtlas.csv")
+atlas <- read_csv(here("how/inputs/ResearchAtlas.csv"))
 atlas_la <- atlas %>%
   filter(State == "California", County == "Los Angeles County") %>%
   select(CensusTract, 
@@ -125,6 +185,13 @@ atlas_la_clean <- atlas %>%
   mutate(CensusTract = as.character(CensusTract))
 
 la_tracts <- la_tracts %>%
+  mutate(GEOID = str_pad(GEOID, 11, pad = "0"))
+
+atlas_la_clean <- atlas_la_clean %>%
+  mutate(CensusTract = str_pad(CensusTract, 11, pad = "0"))
+
+
+la_tracts_atlas <- la_tracts %>%
   mutate(CensusTract = GEOID) %>%
   left_join(atlas_la_clean, by = "CensusTract")
 
@@ -143,11 +210,16 @@ hfc_labels <- hfc_zip_counts %>%
   st_as_sf(coords = c("lng", "lat"), crs = 4326)
 
 
+
+bbox <- st_bbox(zcta_la)  # extract bounding box from ZIP shapefile
+
 ggplot() +
-  geom_sf(data = la_tracts, aes(fill = TractSNAP), color = "white", size = 0.2) +
+  geom_sf(data = la_tracts_atlas, aes(fill = TractSNAP), color = "white", size = 0.2) +
   scale_fill_viridis_c(option = "plasma", na.value = "grey80", name = "% in Group Quarters") +
   geom_sf(data = hfc_labels, color = "black", shape = 21, fill = "white", size = 2, stroke = 0.5) +
   geom_sf_text(data = hfc_labels, aes(label = hfc_count), size = 3, fontface = "bold") +
+ # coord_sf(xlim = c(bbox_poly["xmin"], bbox_poly["xmax"]),
+#           ylim = c(bbox_poly["ymin"], bbox_poly["ymax"])) +
   labs(
     title = "Group Quarters Population by Census Tract (Los Angeles County)",
     subtitle = "Labeled by number of HFCs per ZIP code",
@@ -155,6 +227,32 @@ ggplot() +
   ) +
   theme_minimal() +
   theme(legend.position = "right")
+
+
+
+
+```
+
+```{r make bounds for zips / cts}
+
+library(sf)
+
+la_zip_candidates <- zipcode_info %>%
+  filter(!is.na(lat) & !is.na(lng)) %>%
+  filter(zipcode %in% long$zip |
+         (lng >= st_bbox(zcta_la)["xmin"] & lng <= st_bbox(zcta_la)["xmax"] &
+          lat >= st_bbox(zcta_la)["ymin"] & lat <= st_bbox(zcta_la)["ymax"])) %>%
+  st_as_sf(coords = c("lng", "lat"), crs = 4326, remove = FALSE)
+
+
+zcta_la_strict <- zcta %>%
+  rename(zipcode = ZCTA5CE20) %>%
+  mutate(zipcode = str_pad(as.character(zipcode), 5, pad = "0")) %>%
+  filter(zipcode %in% la_zip_candidates$zipcode)
+
+
+# Filter by bounding box
+bbox_poly <- st_as_sfc(st_bbox(zcta_la_strict), crs = 4326)
 
 
 
