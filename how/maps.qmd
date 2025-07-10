@@ -1,0 +1,193 @@
+---
+title: "maps"
+author: "hannah"
+format: html
+editor: visual
+---
+
+Goal: quickly visualize data in map form so HoFoCo can more quickly assess which geographies might be worth expanding into and/or which areas might have greatest need.
+
+```{r}
+library(readr)
+library(tidyverse)
+library(sf)
+
+HFC <- read_csv("how/raw_data/HFC_how.csv")
+
+long = HFC %>%
+  # Separate ZIP codes into rows
+  separate_rows(`Service Locations`, sep = ",\\s*") %>%
+  # Clean up whitespace just in case
+  mutate(`Service Locations` = str_trim(`Service Locations`)) %>%
+  # Optional: rename the column for clarity
+  rename(zip = `Service Locations`)
+
+```
+
+```{r}
+# Get lat/lon for zip codes 
+zipcode_info <- zipcodeR::zip_code_db
+zipcode_info$housing_ratio = zipcode_info$occupied_housing_units / zipcode_info$housing_units
+HFC_geo <- long %>%
+  left_join(zipcode_info, by = c("zip" = "zipcode")) %>% 
+  filter(!is.na(lat) & !is.na(lng))
+ # filter(lat >33.5)#remove weird island thing 
+
+
+```
+
+```{r map of zipcode level housing_ratio}
+
+# Filter only ZIPs in Los Angeles County
+la_zip_sf <- zipcode_info %>%
+  filter(major_city == "Los Angeles" & state == "CA") %>%
+  filter(!is.na(lat) & !is.na(lng)) %>%
+  st_as_sf(coords = c("lng", "lat"), crs = 4326, remove = FALSE)
+
+library(tigris)
+options(tigris_use_cache = TRUE)
+
+# Get ZIP tabulation areas for CA
+zcta <- zctas(cb = TRUE, year = 2020)
+
+
+
+zcta_la <- zcta %>%
+  rename(zipcode = ZCTA5CE20) %>%
+  filter(zipcode %in% la_zip_sf$zipcode) %>%
+  left_join(zipcode_info, by = "zipcode")
+
+HFC_geo <- long %>%
+  left_join(zipcode_info, by = c("zip" = "zipcode")) %>%
+  filter(!is.na(lat) & !is.na(lng)) %>%
+  st_as_sf(coords = c("lng", "lat"), crs = 4326)
+
+#some corrections to make sure HFC and ct align 
+zcta_la <- st_transform(zcta_la, crs = 4326)
+HFC_geo <- st_transform(HFC_geo, crs = 4326)
+valid_zips <- zcta_la$zipcode
+HFC_geo_filtered <- HFC_geo %>%
+     filter(zip %in% valid_zips)
+ 
+ 
+
+
+ggplot() +
+  geom_sf(data = zcta_la, aes(fill = housing_ratio), color = "white", size = 0.2) +
+  scale_fill_viridis_c(option = "plasma", na.value = "grey80", name = "Housing Ratio") +
+  geom_sf(data = HFC_geo_filtered, color = "black", shape = 21, fill = "white", size = 2, stroke = 0.5) +
+  labs(
+    title = "Housing Occupancy Ratio by ZIP Code (Los Angeles County)",
+    subtitle = "Dots represent HFC recipients",
+    caption = "Data: National Association of Realtors (zipcodeR), tigris, HFC"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+
+
+```
+
+```{r}
+
+# data from: https://www.ers.usda.gov/data-products/food-access-research-atlas/download-the-data
+atlas <- read_csv("how/inputs/ResearchAtlas.csv")
+atlas_la <- atlas %>%
+  filter(State == "California", County == "Los Angeles County") %>%
+  select(CensusTract, 
+         LILATracts_halfAnd10, #Flag for low-income and low access when considering low accessibilty at 1/2 and 10 miles
+         PCTGQTRS, #Percent of tract population residing in group quarters
+         lalowihalfshare, #Share of tract population that are low income individuals beyond 1/2 mile from supermarket
+         lasnaphalfshare, #Share of tract housing units receiving SNAP benefits count beyond 0.5 mile from supermarket
+         TractSNAP #Total count of housing units receiving SNAP benefits in tract
+)
+
+# want to add the race specific vars next!!!! 
+
+library(tigris)
+library(sf)
+library(dplyr)
+
+options(tigris_use_cache = TRUE)
+
+# Get 2020 census tract geometries for LA County
+la_tracts <- tracts(state = "CA", county = "Los Angeles", year = 2020, cb = TRUE)
+
+# Join Atlas data to tract geometries
+atlas_la_clean <- atlas %>%
+  filter(State == "California", County == "Los Angeles County") %>%
+  select(CensusTract,
+         LILATracts_halfAnd10,
+         PCTGQTRS,
+         lalowihalfshare,
+         lasnaphalfshare,
+         TractSNAP) %>%
+  mutate(CensusTract = as.character(CensusTract))
+
+la_tracts <- la_tracts %>%
+  mutate(CensusTract = GEOID) %>%
+  left_join(atlas_la_clean, by = "CensusTract")
+
+# Count number of HFCs per ZIP
+hfc_zip_counts <- long %>%
+  count(zip, name = "hfc_count")
+
+zip_centroids <- zipcode_info %>%
+  filter(county == "Los Angeles County", state == "CA", !is.na(lat), !is.na(lng)) %>%
+  select(zipcode, lat, lng) %>%
+  distinct(zipcode, .keep_all = TRUE)
+
+hfc_labels <- hfc_zip_counts %>%
+  left_join(zip_centroids, by = c("zip" = "zipcode")) %>%
+  filter(!is.na(lat) & !is.na(lng)) %>%
+  st_as_sf(coords = c("lng", "lat"), crs = 4326)
+
+
+ggplot() +
+  geom_sf(data = la_tracts, aes(fill = TractSNAP), color = "white", size = 0.2) +
+  scale_fill_viridis_c(option = "plasma", na.value = "grey80", name = "% in Group Quarters") +
+  geom_sf(data = hfc_labels, color = "black", shape = 21, fill = "white", size = 2, stroke = 0.5) +
+  geom_sf_text(data = hfc_labels, aes(label = hfc_count), size = 3, fontface = "bold") +
+  labs(
+    title = "Group Quarters Population by Census Tract (Los Angeles County)",
+    subtitle = "Labeled by number of HFCs per ZIP code",
+    caption = "Data: USDA Food Access Research Atlas, zipcodeR, HFC"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+
+
+```
+
+```{r map of LA county service planning areas}
+
+# Load the shapefile of LA County Service Planning Areas
+spa_shapefile <- st_read("how/inputs/Service_Planning_Areas_(2022).shp")
+
+
+
+# Step 1: Convert HFC_geo to an sf object (if it is not already)
+HFC_geo_sf <- st_as_sf(HFC_geo, coords = c("lng", "lat"), crs = 4326)
+
+# Step 2: Ensure both datasets are in the same CRS
+spa_map_crs <- st_crs(spa_shapefile)  # Get the CRS from the map data
+HFC_geo_sf <- st_transform(HFC_geo_sf, crs = spa_map_crs)  # Transform HFC_geo to match the CRS of the map
+
+# Step 3: Create the combined map with points
+spa_map_with_scatter <- ggplot(data = spa_shapefile) +
+  geom_sf(color = "black", fill = "transparent") +  # Draw the spatial map
+  geom_sf(data = HFC_geo_sf, aes(geometry = geometry), color = "#2980B9", size = 3, alpha = 0.7) +  # Add points
+  labs(title = "HoFoCo Providers", subtitle = "Overlayed on Los Angeles SPAs") + 
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),   # Remove grid lines
+    axis.text = element_blank(),    # Remove axis text (numbers)
+    axis.ticks = element_blank(),   # Remove axis ticks
+    axis.title = element_blank()    # Remove axis titles
+  )
+
+# View the combined map
+spa_map_with_scatter
+
+```

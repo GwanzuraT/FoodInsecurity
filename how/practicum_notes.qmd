@@ -1,0 +1,69 @@
+---
+title: "practicum notes"
+format: html
+editor: visual
+---
+
+## July 7
+
+-   need abstract from previous team
+
+-   CA versus federal work requirements - does this change HoFoCo's ability to serve?
+
+-   four goals from the case study:
+
+    -   improve affordability of healthy foods
+
+    -   increase equitable access to healthy foods
+
+    -   build market demand and consumption of healthy foods
+
+    -   support sustainability and resilience in food systems and supply chains
+
+    -   
+
+    -   how do we define "healthy", "equitable", "affordability", "impact", etc ???
+
+        -   does each org/ partnership define these terms on their own?
+
+    -   what parts of this food distribution system are most vulnerable/most likely to "break"?
+
+    -   do we want to focus on the individuals who are receiving services or at the level of the orgs? or hofoco as a whole? or hofoco volunteers?
+
+        -   it will be multilevel. we will start broad and then narrow so that we don't miss any unknown unknowns
+
+    -   do individuals eat/like the food that they receive? what kinds of food do they prefer? is the food both healthy and "appropriate"?
+
+    -   what kind of control does hofoco/ the orgs they serve have over the food they provide?
+
+    -   outcomes: how many ppl are being served? what percent of the pop of a zipcode is being served? are measures of food insecurity changing over time? are there any costs that are being avoided as a result of the services provided?
+
+    -   are there any strings attached to donations? and what kinds of donations are received? food and time and others??
+
+    -   age + housing status are important factors to consider (from may)
+
+    -   dental problems??? dental status? esp as ppl age this is directly related to diet
+
+    -   is there an optimal scale? ie a size/ number of orgs / number of recipients which they can most efficiently provide services for ?
+
+    -   are any parts of the timeline regulated? ie for how long are foods able to be stored before they cannot be consumed
+
+-   CLD practice
+
+    -   vars that are not connected to any others can be considered "exogenous" variables - ie these are the vars we can push on to implement change (MODIFIABLE)
+
+    -   can we incorporate the 1 and 5 year growth plans into our CLD?
+
+    -   "always 30 min from a running model" - mostly we're just thinking about what's next
+
+-   Community directed graphing (this has some other name / acronym, I think??)
+
+    -   cool scripts thing <https://en.wikibooks.org/wiki/Scriptapedia> (wish i'd known about this for lesotho project!!! and also for n4bw)
+
+    -   
+
+# July 9 
+
+-   volunteer burn out versus inventory flow model (Jalen did this using anyLogic)
+
+-   
