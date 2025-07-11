@@ -5,9 +5,53 @@ format: html
 editor: visual
 ---
 
-Goal: quickly visualize data in map form so HoFoCo can more quickly assess which geographies might be worth expanding into and/or which areas might have greatest need.
+Eventually: a function that allows users to select:
 
-interesting cols: total served monthly, unique individuals served monthly; total recipient orgs, org type/primary services, services per person per month
+-   An overlay variable describing HFC recipient organizations (at the ZIP code level)
+
+-   A background variable describing the food environment in Los Angeles (at the census tract level)
+
+The goal is to quickly visualize relevant data so that HoFoCo can assess:
+
+-   Which geographies may be worth expanding into
+
+-   Which areas may demonstrate the greatest need
+
+**Overlay Variables (HFC Recipient Orgs, ZIP Code Level):**
+
+-    `AvgTotMonthly`: Total number served monthly by each org, divided by the number of ZIP codes served by that org, then aggregated by ZIP code.
+
+-   `AvgUniqueInds`: Unique individuals served monthly by each org, divided by the number of ZIP codes served by that org, then aggregated by ZIP code.
+
+-   `HFC_count`: The number of HFC recipient organizations operating in each ZIP code.
+
+**Background Variables (LA County, Census Tract Level)**
+
+-   `LILATracts_halfAnd10`: Flag for low-income and low access when considering low accessibilty at 1/2 and 10 miles - from USDA Food Atlas
+
+-   `PCTGQTRS`: Percent of tract population residing in group quarters - from USDA Food Atlas
+
+-   `lalowihalfshare`: Share of tract population that are low income individuals beyond 1/2 mile from supermarket - from USDA Food Atlas
+
+-   `lasnaphalfshare`: Share of tract housing units receiving SNAP benefits count beyond 0.5 mile from supermarket - from USDA Food Atlas
+
+-   `TractSNAP`: Total count of housing units receiving SNAP benefits in tract - from USDA Food Atlas
+
+**Possible Additional Overlay Variables:**
+
+-    Org type / primary services
+
+-   Services per person per month
+
+-   Diversity score? based on the racial categories served
+
+**Possible Additional Background Variables**
+
+-   Race-specific food insecurity vars from Food Atlas
+
+-   Other food services available (not sure on data source for this one....)
+
+-   Healthy Places Index Data (haven't fully dug into this yet)
 
 ```{r}
 library(readr)
@@ -16,13 +60,18 @@ library(sf)
 
 HFC <- read_csv("how/raw_data/HFC_how.csv")
 
+# make each zipcode into a unique row 
+# make some overlay columns (ie various ways to describe HFC recipients)
 long = HFC %>%
   # Separate ZIP codes into rows
   separate_rows(`Service Locations`, sep = ",\\s*") %>%
   # Clean up whitespace just in case
   mutate(`Service Locations` = str_trim(`Service Locations`)) %>%
   # Optional: rename the column for clarity
-  rename(zip = `Service Locations`)
+  rename(zip = `Service Locations`) %>% 
+  group_by(`Org ID`) %>% 
+  mutate(AvgTotMonthly = `Total served monthly` / length(unique(zip)),
+         AvgUniqueInds = `Unique individuals served monthly`/ length(unique(zip)))
 
 ```
 
@@ -84,7 +133,7 @@ ggplot() +
   geom_sf(data = HFC_geo_filtered, aes(size = hfc_count), color = "black", shape = 21, fill = "white", stroke = 0.5) +
   scale_size_continuous(range = c(1, 6), name = "HFC Recipient Orgs") +   # Adjust dot size range as desired
   labs(
-    title = "Housing Occupancy Ratio by ZIP Code (Los Angeles County)",
+    title = "Ratio of Occupied Housing Units to Total Housing Units",
     subtitle = "Dot size proportional to number of HFC recipient orgs per ZIP",
     caption = "Data: National Association of Realtors (zipcodeR), tigris, HFC"
   ) +
@@ -95,7 +144,84 @@ ggplot() +
 
 ```
 
-```{r map of HFC recipients }
+```{r SNAP at CT level }
+library(tigris)
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(readr)
+library(here)
+
+options(tigris_use_cache = TRUE)
+
+# Load Atlas data
+atlas <- read_csv(here("how/inputs/ResearchAtlas.csv"))
+
+atlas_la <- atlas %>%
+  filter(State == "California", County == "Los Angeles County") %>%
+  select(CensusTract, 
+         LILATracts_halfAnd10,
+         PCTGQTRS,
+         lalowihalfshare,
+         lasnaphalfshare,
+         TractSNAP) %>%
+  mutate(CensusTract = str_pad(as.character(CensusTract), 11, pad = "0"))
+
+# 1. Standardize ZIP codes
+long <- long %>%
+  mutate(zip = str_pad(as.character(zip), 5, pad = "0"))
+
+# 2. Count occurrences of each ZIP
+zip_counts <- long %>%
+  count(zip, name = "hfc_count")
+
+# 3. Load ZCTA shapefile and filter to ZIPs in `long`
+zcta <- zctas(cb = TRUE, year = 2020)
+
+zcta_long <- zcta %>%
+  rename(zip = ZCTA5CE20) %>%
+  mutate(zip = str_pad(as.character(zip), 5, pad = "0")) %>%
+  filter(zip %in% zip_counts$zip) %>%
+  left_join(zip_counts, by = "zip") %>%
+  st_transform(crs = 4326) %>%
+  mutate(centroid = st_centroid(geometry)) %>%
+  mutate(lat = st_coordinates(centroid)[,2]) %>%
+  filter(lat >= 33.5 & lat <= 34.5)
+
+# Create ZIP centroid points for HFC dots
+zip_centroids <- zcta_long %>%
+  st_centroid() %>%
+  mutate(lat = st_coordinates(.)[,2]) %>%
+  filter(lat >= 33.5 & lat <= 34.5)
+
+# 4. Load LA County census tracts and join with atlas SNAP data
+la_tracts <- tracts(state = "CA", county = "Los Angeles", cb = TRUE, year = 2020) %>%
+  st_transform(crs = 4326) %>%
+  mutate(GEOID = str_pad(GEOID, 11, pad = "0")) %>%
+  left_join(atlas_la, by = c("GEOID" = "CensusTract")) %>%
+  mutate(centroid = st_centroid(geometry)) %>%
+  mutate(lat = st_coordinates(centroid)[,2]) %>%
+  filter(lat >= 33.5 & lat <= 34.5)
+
+# 5. Plot: Tract fill = TractSNAP, overlay ZIPs by count
+ggplot() +
+  geom_sf(data = la_tracts, aes(fill = TractSNAP), color = "white", size = 0.2) +
+  geom_sf(data = zip_centroids, aes(size = hfc_count), color = "cyan",fill="cyan", alpha =0.5, shape = 21, stroke = 1) +
+  scale_fill_viridis_c(option = "plasma", name = "# of SNAP Households", na.value = "grey90") +
+  scale_size_continuous(range = c(1, 6), name = "# of HFC recipient orgs") +
+  labs(
+    title = "SNAP Participation by Census Tract (Los Angeles County)",
+    subtitle = "Overlaid with number of HFC recipient orgs by ZIP code"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")+ 
+  coord_sf(xlim = c(-118.52, -118.12), ylim = c(33.9, 34.2), expand = FALSE) #zoom in a little 
+
+
+```
+
+```{r map of HFC recipients - not in use }
 
 library(tigris)
 library(sf)
@@ -148,7 +274,7 @@ ggplot() +
 
 ```
 
-```{r}
+```{r - scratch }
 library(here)
 # data from: https://www.ers.usda.gov/data-products/food-access-research-atlas/download-the-data
 atlas <- read_csv(here("how/inputs/ResearchAtlas.csv"))
@@ -233,32 +359,7 @@ ggplot() +
 
 ```
 
-```{r make bounds for zips / cts}
-
-library(sf)
-
-la_zip_candidates <- zipcode_info %>%
-  filter(!is.na(lat) & !is.na(lng)) %>%
-  filter(zipcode %in% long$zip |
-         (lng >= st_bbox(zcta_la)["xmin"] & lng <= st_bbox(zcta_la)["xmax"] &
-          lat >= st_bbox(zcta_la)["ymin"] & lat <= st_bbox(zcta_la)["ymax"])) %>%
-  st_as_sf(coords = c("lng", "lat"), crs = 4326, remove = FALSE)
-
-
-zcta_la_strict <- zcta %>%
-  rename(zipcode = ZCTA5CE20) %>%
-  mutate(zipcode = str_pad(as.character(zipcode), 5, pad = "0")) %>%
-  filter(zipcode %in% la_zip_candidates$zipcode)
-
-
-# Filter by bounding box
-bbox_poly <- st_as_sfc(st_bbox(zcta_la_strict), crs = 4326)
-
-
-
-```
-
-```{r map of LA county service planning areas}
+```{r map of LA county service planning areas - not in use}
 
 # Load the shapefile of LA County Service Planning Areas
 spa_shapefile <- st_read("how/inputs/Service_Planning_Areas_(2022).shp")
